@@ -27,8 +27,8 @@ export default function MoreTools() {
       color: "bg-neutral-900 text-white dark:bg-neutral-800"
     },
     {
-      name: "Reddit Video Downloader",
-      desc: "Seamlessly extract Reddit videos with audio synchronized, bypassing standard dash streams limitations.",
+      name: "Facebook Video Downloader",
+      desc: "Seamlessly extract Facebook videos with audio synchronized, bypassing standard dash streams limitations.",
       badge: "LIVE",
       status: "live",
       color: "bg-orange-500 text-white"

@@ -42,7 +42,7 @@ export default function Header({ darkMode, toggleDarkMode, activeTab, setActiveT
           onClick={() => setActiveTab("download")} 
           id="brand-logo-container"
         >
-          <span className="text-3xl font-black font-sans text-blue-600 dark:text-blue-500 tracking-tighter leading-none select-none" id="brand-logo-q">
+          <span className="text-2xl font-black font-sans text-blue-600 dark:text-blue-500 tracking-tighter leading-none select-none" id="brand-logo-q">
             Q
           </span>
           <span className="text-xl font-bold tracking-tight text-gray-950 dark:text-white font-sans leading-none" id="brand-name-suffix">
