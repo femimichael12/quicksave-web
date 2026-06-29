@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -17,8 +16,6 @@ import https from "https";
 import http from "http";
 import os from "os";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Binary paths
 const binDir = path.join(process.cwd(), "bin");
