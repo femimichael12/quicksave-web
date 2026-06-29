@@ -1,0 +1,18 @@
+# Render deployment configuration
+# Docs: https://render.com/docs/render-yaml
+
+services:
+  - type: web
+    name: quicksave
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      # Add your GEMINI_API_KEY in the Render dashboard under Environment Variables
+      # - key: GEMINI_API_KEY
+      #   sync: false

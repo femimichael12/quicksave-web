@@ -1,0 +1,6 @@
+{
+  "name": "QuickSave Video Downloader",
+  "description": "A professional full-stack Twitter and Instagram downloader featuring yt-dlp integration, range-aware proxy streaming, and a built-in Gemini-powered social media assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
