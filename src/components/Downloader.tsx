@@ -257,12 +257,11 @@ export default function Downloader() {
                 {(result.status === "redirect" || result.status === "stream") && result.url && (
                  <div className="w-full lg:w-80 shrink-0 bg-gray-900 rounded-2xl overflow-hidden aspect-video md:aspect-[9/16] relative flex items-center justify-center border border-gray-800 shadow-inner group">
                     <video
-                      src={result.url}
+                    src={result.url}
                       controls
-                      playsInline
-                      className="w-full h-full object-contain"
-                      referrerPolicy="no-referrer"
-                    />
+                        playsInline
+                        className="w-full h-full object-contain"
+/>
                     <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white uppercase backdrop-blur-sm">
                       <Play className="h-3 w-3 text-blue-400 fill-current" /> Preview
                     </div>
