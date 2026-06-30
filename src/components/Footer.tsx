@@ -16,7 +16,7 @@ export default function Footer({ setActiveTab }: { setActiveTab: (tab: string) =
           {/* Logo & Description Column */}
           <div className="lg:col-span-2" id="footer-brand-col">
             <div className="flex items-baseline gap-0.5 mb-4 cursor-pointer select-none" onClick={() => setActiveTab("download")} id="footer-logo">
-              <span className="text-3xl font-black font-sans text-blue-600 dark:text-blue-500 tracking-tighter leading-none select-none" id="footer-logo-q">
+              <span className="text-2xl font-black font-sans text-blue-600 dark:text-blue-500 tracking-tighter leading-none select-none" id="footer-logo-q">
                 Q
               </span>
               <span className="text-xl font-bold font-sans tracking-tight text-gray-900 dark:text-white leading-none">

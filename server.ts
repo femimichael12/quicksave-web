@@ -221,7 +221,12 @@ async function startServer() {
       if (isYtDlpAvailable) {
         try {
           const info = await getMediaInfo(url);
-          
+          try {
+    const info = await getMediaInfo(url);
+  } catch (err) {
+    console.error("yt-dlp failed:");
+    console.error(err);
+  }
           if (info) {
             const cleanTitle = (info.title || "video").replace(/[^a-zA-Z0-9_.-]/g, "_").substring(0, 50);
             

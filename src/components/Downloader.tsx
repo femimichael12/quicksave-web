@@ -250,12 +250,12 @@ export default function Downloader() {
             id="downloader-results-card"
           >
             {/* Main Result Body */}
-            <div className="bg-white border border-gray-100 rounded-3xl p-6 md:p-8 shadow-sm dark:bg-gray-950 dark:border-gray-900 space-y-6">
-              <div className="flex flex-col md:flex-row gap-6 items-start">
+            <div className="bg-white border border-gray-100 rounded-3xl p-6 md:p-8 shadow-sm dark:bg-gray-950 dark:border-gray-900 space-y-6 overflow-hidden">
+             <div className="flex flex-col lg:flex-row gap-6 items-start">
                 
                 {/* Media Preview Player (if single URL) */}
                 {(result.status === "redirect" || result.status === "stream") && result.url && (
-                  <div className="w-full md:w-80 shrink-0 bg-gray-900 rounded-2xl overflow-hidden aspect-video md:aspect-[9/16] relative flex items-center justify-center border border-gray-800 shadow-inner group">
+                 <div className="w-full lg:w-80 shrink-0 bg-gray-900 rounded-2xl overflow-hidden aspect-video md:aspect-[9/16] relative flex items-center justify-center border border-gray-800 shadow-inner group">
                     <video
                       src={result.url}
                       controls
@@ -270,7 +270,7 @@ export default function Downloader() {
                 )}
 
                 {/* Media Detail & Action Column */}
-                <div className="flex-grow space-y-6 w-full">
+                <div className="flex-1 min-w-0 space-y-6 w-full overflow-hidden">
                   <div className="space-y-1">
                     <div className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 dark:bg-green-950/40 dark:text-green-400">
                       ✓ Extraction Successful
@@ -278,7 +278,7 @@ export default function Downloader() {
                     <h3 className="text-2xl font-semibold font-display tracking-tight text-gray-950 dark:text-white">
                       Your Download is Ready!
                     </h3>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate max-w-md">
+                    <p className="text-xs text-gray-400 dark:text-gray-500 font-mono break-all">
                       Source: {url}
                     </p>
                   </div>
@@ -290,13 +290,13 @@ export default function Downloader() {
                         href={result.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 px-6 rounded-2xl shadow-md transition-all active:scale-98"
+                        className="w-full max-w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 px-4 rounded-2xl shadow-md transition-all active:scale-98"
                         id="primary-download-anchor"
                       >
                         <Download className="h-5 w-5" /> Download Media File
                       </a>
                       
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
                         <button
                           type="button"
                           onClick={() => handleCopyLink(result.url || "")}
