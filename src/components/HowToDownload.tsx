@@ -11,7 +11,7 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
     {
       num: "1",
       title: "Copy the Link",
-      desc: "Go to Twitter (X) or Instagram. Tap on the Share icon below the post or video, and choose 'Copy Link' or 'Copy URL' from the available options.",
+      desc: "Go to Twitter (X), Instagram, YouTube, or TikTok. Tap on the Share icon below the video or post, and select 'Copy Link' or 'Copy URL'.",
       icon: Link,
       color: "from-blue-500 to-cyan-500",
     },
@@ -36,8 +36,8 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
       name: "Android Phone & Tablet",
       icon: Smartphone,
       steps: [
-        "Open the Twitter (X) or Instagram app in your browser or native app.",
-        "Locate the video or GIF you want to save, tap the Share icon, and choose 'Copy Link'.",
+        "Open Twitter, Instagram, YouTube, or TikTok in your mobile browser or app.",
+        "Locate the video, Reel, Short, or TikTok clip you want to save, tap Share, and choose 'Copy Link'.",
         "Open QuickSave in your mobile browser, paste the link, and tap download.",
         "Alternatively, use our app shortcuts or bookmarklet for rapid, instant one-tap downloads.",
       ],
@@ -46,7 +46,7 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
       name: "iPhone & iPad (iOS)",
       icon: Tablet,
       steps: [
-        "Copy the media link from Twitter/X or Instagram in your native iOS app.",
+        "Copy the media link from Twitter, Instagram, YouTube, or TikTok in your native iOS app.",
         "Paste the link into QuickSave using Safari or Chrome browser on your iOS device.",
         "Tap 'Download', choose your quality, and the direct video stream will open.",
         "For iOS 13+, tap the share sheet in Safari and select 'Save to Files' to add it directly to your camera roll.",
@@ -56,8 +56,8 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
       name: "Desktop and Laptop",
       icon: Monitor,
       steps: [
-        "In your desktop browser (Chrome, Safari, Firefox, Edge), copy the direct URL of the tweet or Instagram post.",
-        "Paste the copied URL in the big input field on QuickSave and click the blue 'Download' button.",
+        "In your desktop browser (Chrome, Safari, Firefox, Edge), copy the URL of the post, tweet, video, or TikTok clip.",
+        "Paste the copied URL in the input field on QuickSave and click the blue 'Download' button.",
         "Your download starts immediately and is saved directly to your default Downloads folder in full HD.",
       ],
     },
@@ -73,7 +73,7 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
             How to Download Social Videos
           </h2>
           <p className="mt-4 text-base md:text-lg text-gray-500 dark:text-gray-400 font-light">
-            Downloading videos and GIFs from Twitter (X) and Instagram is an absolute breeze using QuickSave. Just follow these three simple steps:
+            Downloading videos, Reels, Shorts, and TikToks is an absolute breeze using QuickSave. Just follow these three simple steps:
           </p>
         </div>
 
@@ -177,7 +177,7 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
             Ready to Save Social Media Content?
           </h3>
           <p className="text-blue-100 text-sm md:text-base leading-relaxed font-light">
-            Get your high-resolution videos and animated GIFs instantly from Twitter (X) and Instagram. No registration, completely free, and unlimited speeds.
+            Get your high-resolution videos, Shorts, Reels, and TikTok clips instantly. No registration, completely free, and unlimited speeds.
           </p>
         </div>
         <button

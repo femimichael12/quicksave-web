@@ -24,7 +24,7 @@ export default function Footer({ setActiveTab }: { setActiveTab: (tab: string) =
               </span>
             </div>
             <p className="text-sm leading-relaxed text-gray-500 dark:text-gray-400 mb-6 max-w-md">
-              We are not affiliated or endorsed by Twitter/X or Instagram. We do not host any video, photo, or audio media on our servers. All fetched media files are downloaded directly from their respective content delivery networks. All rights belong to their respective owners.
+              We are not affiliated or endorsed by Twitter/X, Instagram, YouTube, or TikTok. We do not host any video, photo, or audio media on our servers. All fetched media files are downloaded directly from their respective content delivery networks. All rights belong to their respective owners.
             </p>
             <div className="flex items-center gap-3" id="footer-socials">
               <a href="#" className="flex h-9 w-9 items-center justify-center rounded-full bg-white border border-gray-200 text-gray-500 hover:bg-blue-50 hover:text-blue-600 dark:bg-gray-900 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-blue-950/40 dark:hover:text-blue-400 transition-colors">
@@ -58,7 +58,7 @@ export default function Footer({ setActiveTab }: { setActiveTab: (tab: string) =
                 <a href="#" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Terms of Service</a>
               </li>
               <li>
-                <a href="#" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Contact Us</a>
+                <a href="https://wa.me/2348129697419" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Contact Us</a>
               </li>
             </ul>
           </div>
@@ -66,7 +66,7 @@ export default function Footer({ setActiveTab }: { setActiveTab: (tab: string) =
           {/* Quick Links / Our Sites */}
           <div id="footer-sites-col">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-900 dark:text-white mb-4">
-              Our Sites
+              Our Portals
             </h3>
             <ul className="space-y-2 text-sm">
               <li>
@@ -77,6 +77,16 @@ export default function Footer({ setActiveTab }: { setActiveTab: (tab: string) =
               <li>
                 <button onClick={() => setActiveTab("download")} className="text-left hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
                   Instagram Downloader
+                </button>
+              </li>
+              <li>
+                <button onClick={() => setActiveTab("download")} className="text-left hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                  YouTube Downloader
+                </button>
+              </li>
+              <li>
+                <button onClick={() => setActiveTab("download")} className="text-left hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                  TikTok Downloader
                 </button>
               </li>
             </ul>

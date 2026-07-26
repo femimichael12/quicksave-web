@@ -25,4 +25,4 @@ export interface MarketingBundle {
   hook: string;
 }
 
-export type Platform = "twitter" | "instagram" | "unknown";
+export type Platform = "twitter" | "instagram" | "youtube" | "tiktok" | "unknown";

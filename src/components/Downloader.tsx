@@ -21,6 +21,8 @@ export default function Downloader() {
   const getPlatform = (inputUrl: string): Platform => {
     if (/twitter\.com|x\.com/.test(inputUrl)) return "twitter";
     if (/instagram\.com/.test(inputUrl)) return "instagram";
+    if (/youtube\.com|youtu\.be/.test(inputUrl)) return "youtube";
+    if (/tiktok\.com/.test(inputUrl)) return "tiktok";
     return "unknown";
   };
 
@@ -33,13 +35,13 @@ export default function Downloader() {
   const handleDownload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url) {
-      setError("Please paste a valid Twitter (X) or Instagram link.");
+      setError("Please paste a valid Twitter (X), Instagram, YouTube, or TikTok link.");
       return;
     }
 
     const platform = getPlatform(url);
     if (platform === "unknown") {
-      setError("Invalid URL. Only Twitter (X) and Instagram URLs are supported.");
+      setError("Invalid URL. Twitter (X), Instagram, YouTube, and TikTok URLs are supported.");
       return;
     }
 
@@ -97,13 +99,31 @@ export default function Downloader() {
             className="text-4xl sm:text-5xl md:text-6xl font-medium font-display tracking-tight text-gray-950 dark:text-white"
             id="downloader-heading"
           >
-            <span className="text-blue-500 dark:text-blue-400 font-light">Twitter</span> &{" "}
-            <span className="text-pink-500 dark:text-pink-400 font-light">Instagram</span>
+            <span className="text-blue-500 dark:text-blue-400 font-light">Twitter</span>,{" "}
+            <span className="text-pink-500 dark:text-pink-400 font-light">Instagram</span>,{" "}
+            <span className="text-red-500 dark:text-red-400 font-light">YouTube</span> &{" "}
+            <span className="text-teal-400 dark:text-teal-300 font-light">TikTok</span>
             <br className="sm:hidden" /> Video Downloader
           </motion.h1>
-          <p className="text-base md:text-lg text-gray-500 dark:text-gray-400 max-w-xl mx-auto font-sans font-light leading-relaxed" id="downloader-subheading">
-            Download high-quality videos, GIFs, and carousel photos from any Tweet or Instagram post. Completely free.
+          <p className="text-base md:text-lg text-gray-500 dark:text-gray-400 max-w-2xl mx-auto font-sans font-light leading-relaxed" id="downloader-subheading">
+            Download high-quality videos, Shorts, Reels, GIFs, and audio tracks from Twitter (X), Instagram, YouTube, and TikTok. Completely free.
           </p>
+
+          {/* Supported Platforms Badges */}
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-2" id="supported-platforms-badges">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-100 dark:border-blue-900/50">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span> Twitter / X
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-pink-50 text-pink-600 dark:bg-pink-950/40 dark:text-pink-400 border border-pink-100 dark:border-pink-900/50">
+              <span className="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse"></span> Instagram Reels & Posts
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400 border border-red-100 dark:border-red-900/50">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span> YouTube & Shorts
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-teal-50 text-teal-600 dark:bg-teal-950/40 dark:text-teal-400 border border-teal-100 dark:border-teal-900/50">
+              <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></span> TikTok No-Watermark
+            </span>
+          </div>
         </div>
 
         {/* Input Form */}
@@ -119,7 +139,7 @@ export default function Downloader() {
                 required
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="Enter a Tweet or Instagram link e.g. https://twitter.com/..."
+                placeholder="Paste link e.g. https://youtube.com/watch?v=... or tiktok.com/..."
                 className="w-full pl-12 pr-4 py-4 rounded-2xl border border-gray-200 bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 shadow-md shadow-gray-100/50 dark:border-gray-800 dark:bg-gray-950 dark:text-white dark:placeholder-gray-600 dark:shadow-none transition-all"
               />
             </div>
@@ -388,30 +408,30 @@ export default function Downloader() {
       {/* QuickSave info card explaining features */}
       <section className="bg-white border border-gray-100 rounded-3xl p-6 md:p-8 dark:bg-gray-950 dark:border-gray-900 animate-fade-in" id="downloader-features-card">
         <h2 className="text-xl font-semibold font-display tracking-tight text-gray-950 dark:text-white mb-4">
-          QuickSave - Twitter & Instagram Video Downloader
+          QuickSave - Social Video & Audio Downloader
         </h2>
         
         <p className="text-gray-500 dark:text-gray-400 text-sm leading-relaxed mb-6 font-light">
-          QuickSave offers a quick, secure, and fully responsive way to download high-resolution videos and animated GIFs from Twitter (X) and Instagram. The media format you see on these social networks is starkly different from other platforms, and extracting high-speed streams often requires sophisticated proxies. With QuickSave, you get direct high-speed CDN download paths instantly.
+          QuickSave offers a fast, secure, and fully responsive way to download high-resolution videos, Shorts, Reels, and audio tracks from Twitter (X), Instagram, YouTube, and TikTok. Extract high-speed streams instantly in original upload quality without watermarks or software installation.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6" id="features-perks-grid">
           <div className="space-y-2">
             <h3 className="font-semibold font-display text-gray-950 dark:text-white text-sm">✓ Direct HD Downloads</h3>
             <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed font-light">
-              Fetch direct, unthrottled links from Twitter (X) and Instagram CDN systems in full original HD quality.
+              Fetch direct, unthrottled links from Twitter, Instagram, YouTube, and TikTok CDN systems in up to 1080p/4K HD quality.
             </p>
           </div>
           <div className="space-y-2">
-            <h3 className="font-semibold font-display text-gray-950 dark:text-white text-sm">✓ Carousel & Multi-Media</h3>
+            <h3 className="font-semibold font-display text-gray-950 dark:text-white text-sm">✓ Shorts, Reels & TikTok</h3>
             <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed font-light">
-              Supports full Instagram carousel posts, fetching multiple images and videos simultaneously in a selection grid.
+              Full support for short-form video content including YouTube Shorts, Instagram Reels, and clean no-watermark TikTok clips.
             </p>
           </div>
           <div className="space-y-2">
-            <h3 className="font-semibold font-display text-gray-950 dark:text-white text-sm">✓ 100% Free & No Sign-up</h3>
+            <h3 className="font-semibold font-display text-gray-950 dark:text-white text-sm">✓ 100% Free & Unlimited</h3>
             <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed font-light">
-              Download as many videos as you want without creating accounts or paying premium subscription fees.
+              Download as many videos as you want without creating accounts or paying subscription fees. Fast & clean.
             </p>
           </div>
         </div>

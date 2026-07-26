@@ -8,7 +8,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Bypass strict SSL verification for restrictive networks (fixes UNABLE_TO_VERIFY_LEAF_SIGNATURE)
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+// process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 import { spawn, exec } from "child_process";
 import fs from "fs";
@@ -125,6 +125,150 @@ async function initYtDlp() {
   }
 }
 
+// Cache for Cobalt working instances
+interface CobaltInstancesCache {
+  instances: string[];
+  lastFetched: number;
+}
+
+let cobaltCache: CobaltInstancesCache = {
+  instances: [],
+  lastFetched: 0
+};
+
+const COBALT_CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+
+// Fetch working instances from cobalt.directory
+async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "youtube" | "tiktok" = "youtube"): Promise<string[]> {
+  const now = Date.now();
+  if (cobaltCache.instances.length > 0 && (now - cobaltCache.lastFetched < COBALT_CACHE_DURATION)) {
+    console.log("Using cached Cobalt instances list...");
+    return cobaltCache.instances;
+  }
+
+  console.log("Fetching fresh working instances list from cobalt.directory...");
+  try {
+    const list = await new Promise<string[]>((resolve, reject) => {
+      const req = https.get("https://cobalt.directory/api/working?type=api", {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        rejectUnauthorized: false,
+      }, (res) => {
+        let body = "";
+        res.on("data", (chunk) => (body += chunk));
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(body);
+            if (parsed && parsed.data) {
+              const d = parsed.data;
+              // Priority: platform-specific first, then cross platforms, then general API pool
+              let platformList: string[] = d[platform] || [];
+              if (platform === "youtube" && d["youtube-shorts"]) {
+                platformList = Array.from(new Set([...platformList, ...d["youtube-shorts"]]));
+              }
+              const crossList: string[] = Array.from(new Set([...(d.youtube || []), ...(d.tiktok || []), ...(d.instagram || []), ...(d.twitter || [])]));
+              
+              // Combine all non-Frontend keys for general pool
+              const generalPool: string[] = Object.entries(d)
+                .filter(([key]) => key !== "Frontend")
+                .flatMap(([, val]) => val as string[]);
+
+              const merged = Array.from(
+                new Set<string>([...platformList, ...crossList, ...generalPool])
+              );
+
+              // Known instances that require JWT auth — skip these
+              const jwtRequired = new Set([
+                "https://api.qwkuns.me",
+                "https://api-cobalt.eversiege.network",
+                "https://cobaltapi.squair.xyz",
+                "https://nuko-c.meowing.de",
+                "https://cobalt.alpha.wolfy.love",
+                "https://grapefruit.clxxped.lol",
+                "https://cobalt.omega.wolfy.love",
+                "https://lime.clxxped.lol",
+                "https://subito-c.meowing.de",
+                "https://rue-cobalt.xenon.zone",
+                "https://melon.clxxped.lol",
+                "https://cobaltapi.cjs.nz",
+                "https://kityune.imput.net",
+                "https://blossom.imput.net",
+                "https://nachos.imput.net",
+                "https://sunny.imput.net",
+                "https://api.cobalt.liubquanti.click",
+                "https://kitty.tame.gg",
+              ]);
+
+              const cleaned = merged
+                .map((u: string) => {
+                  let clean = u.trim();
+                  // Strip legacy /api/json suffix
+                  if (clean.endsWith("/api/json")) clean = clean.slice(0, -9);
+                  else if (clean.endsWith("/api/json/")) clean = clean.slice(0, -10);
+                  if (clean.endsWith("/")) clean = clean.slice(0, -1);
+                  return clean;
+                })
+                .filter((u) => Boolean(u) && !jwtRequired.has(u));
+
+              console.log(`cobalt.directory: ${platformList.length} ${platform}-capable, ${cleaned.length} usable instances (JWT instances filtered)`);
+              resolve(cleaned);
+            } else {
+              reject(new Error("Invalid response format from cobalt.directory"));
+            }
+          } catch (e: any) {
+            reject(e);
+          }
+        });
+      });
+
+      req.on("error", reject);
+      req.setTimeout(5000, () => {
+        req.destroy();
+        reject(new Error("Timeout fetching cobalt instances list"));
+      });
+    });
+
+    if (list && list.length > 0) {
+      cobaltCache = { instances: list, lastFetched: now };
+      console.log(`Successfully fetched and cached ${list.length} Cobalt instances.`);
+      return list;
+    }
+  } catch (error: any) {
+    console.warn("Failed to fetch working instances from cobalt.directory:", error.message);
+  }
+
+  // Static fallback — only open (non-JWT) Cobalt instances as of 2026-07
+  const fallbackList = [
+    "https://dog.kittycat.boo",
+    "https://cobaltapi.kittycat.boo",
+  ];
+  console.log("Using hardcoded Cobalt fallback list (non-JWT only).");
+  return fallbackList;
+}
+
+// Write a Netscape cookie file for yt-dlp if session cookie is available
+function getInstagramCookieFile(): string | null {
+  const sessionId = process.env.INSTAGRAM_SESSION_COOKIE;
+  if (!sessionId) return null;
+
+  try {
+    const cookieFilePath = path.join(os.tmpdir(), "ig_cookies.txt");
+    const cookieContent = [
+      "# Netscape HTTP Cookie File",
+      "# This is generated automatically by QuickSave",
+      "",
+      // domain, includeSubdomains, path, secure, expiry, name, value
+      `.instagram.com\tTRUE\t/\tTRUE\t2147483647\tsessionid\t${sessionId}`,
+    ].join("\n");
+    fs.writeFileSync(cookieFilePath, cookieContent, "utf8");
+    return cookieFilePath;
+  } catch (e: any) {
+    console.warn("Failed to write Instagram cookie file:", e.message);
+    return null;
+  }
+}
+
 // Query media info with yt-dlp
 function getMediaInfo(url: string): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -132,33 +276,49 @@ function getMediaInfo(url: string): Promise<any> {
       reject(new Error("yt-dlp binary is currently not available."));
       return;
     }
-    
-    const args = ["-j", "--no-playlist", "--no-warnings", url];
+
+    const args: string[] = [];
+
+    // Use session cookie file if available (from env variable)
+    const cookieFile = getInstagramCookieFile();
+    if (cookieFile) {
+      args.push("--cookies", cookieFile);
+      console.log("Using Instagram session cookie from INSTAGRAM_SESSION_COOKIE env variable");
+    }
+
+    args.push(
+      "--dump-single-json",
+      "--no-playlist",
+      "--ignore-errors",
+      "--no-check-certificate",
+      url
+    );
+
     console.log(`Running: ${ytDlpPath} ${args.join(" ")}`);
-    const proc = spawn(ytDlpPath, args);
+    const proc = spawn(ytDlpPath, args, { windowsHide: true });
     let stdout = "";
     let stderr = "";
-    
+
     proc.on("error", (err) => {
       console.error("Failed to start yt-dlp process:", err);
       reject(err);
     });
-    
+
     proc.stdout.on("data", (data) => {
       stdout += data.toString();
     });
-    
+
     proc.stderr.on("data", (data) => {
       stderr += data.toString();
     });
-    
+
     proc.on("close", (code) => {
       if (code !== 0) {
-        console.error("yt-dlp info error stderr:", stderr);
+        console.error("yt-dlp stderr:", stderr.substring(0, 500));
         reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`));
         return;
       }
-      
+
       try {
         const info = JSON.parse(stdout);
         resolve(info);
@@ -208,36 +368,37 @@ async function startServer() {
       // Basic validation for URL
       const isTwitter = /twitter\.com|x\.com/.test(url);
       const isInstagram = /instagram\.com/.test(url);
+      const isYoutube = /youtube\.com|youtu\.be/.test(url);
+      const isTiktok = /tiktok\.com/.test(url);
 
-      if (!isTwitter && !isInstagram) {
+      if (!isTwitter && !isInstagram && !isYoutube && !isTiktok) {
         return res.status(400).json({
-          error: "Invalid URL. Only Twitter (X) and Instagram URLs are supported.",
+          error: "Invalid URL. Twitter (X), Instagram, YouTube, and TikTok URLs are supported.",
         });
       }
 
-      console.log(`Processing download request for: ${url} (Mode: ${downloadMode || "auto"}, Quality: ${videoQuality || "1080"})`);
+      let detectedPlatform: "instagram" | "twitter" | "youtube" | "tiktok" = "youtube";
+      if (isTwitter) detectedPlatform = "twitter";
+      else if (isInstagram) detectedPlatform = "instagram";
+      else if (isTiktok) detectedPlatform = "tiktok";
+      else if (isYoutube) detectedPlatform = "youtube";
 
-      // Strategy A: Try using yt-dlp first
+      console.log(`Processing download request for (${detectedPlatform}): ${url} (Mode: ${downloadMode || "auto"}, Quality: ${videoQuality || "1080"})`);
+
+      // ── Strategy A: yt-dlp ────────────────────────────────────────────────
       if (isYtDlpAvailable) {
         try {
           const info = await getMediaInfo(url);
-          try {
-    const info = await getMediaInfo(url);
-  } catch (err) {
-    console.error("yt-dlp failed:");
-    console.error(err);
-  }
+
           if (info) {
             const cleanTitle = (info.title || "video").replace(/[^a-zA-Z0-9_.-]/g, "_").substring(0, 50);
-            
-            // Check if it's a playlist (e.g., carousel)
+
+            // Carousel / playlist
             if (info._type === "playlist" || (info.entries && info.entries.length > 0)) {
               const entries = info.entries || [];
               const picker = entries.map((entry: any, index: number) => {
                 let entryUrl = entry.url;
                 let entryExt = entry.ext || "mp4";
-                
-                // Select best video format for the entry if formats are available
                 if (entry.formats && entry.formats.length > 0) {
                   const targetHeight = parseInt(videoQuality) || 1080;
                   const validFormats = entry.formats.filter((f: any) => f.url && f.vcodec !== "none" && (f.height || 0) <= targetHeight);
@@ -247,22 +408,17 @@ async function startServer() {
                     entryExt = validFormats[0].ext || "mp4";
                   }
                 }
-                
                 const safeFilename = `${cleanTitle}_part${index + 1}.${entryExt}`;
                 return {
                   url: `/api/stream?url=${encodeURIComponent(entryUrl || "")}&filename=${encodeURIComponent(safeFilename)}`,
                   type: entry.vcodec === "none" ? "audio" : "video",
-                  thumb: entry.thumbnail || entry.thumbnails?.[0]?.url || info.thumbnail || ""
+                  thumb: entry.thumbnail || entry.thumbnails?.[0]?.url || info.thumbnail || "",
                 };
               });
-
-              return res.json({
-                status: "picker",
-                picker
-              });
+              return res.json({ status: "picker", picker });
             }
 
-            // Single video selection format sorting logic
+            // Single media
             let chosenUrl = info.url;
             let chosenExt = info.ext || "mp4";
 
@@ -276,20 +432,14 @@ async function startServer() {
                 }
               } else {
                 const targetHeight = parseInt(videoQuality) || 1080;
-                // Look for formats that have both video and audio
-                const videoFormats = info.formats.filter((f: any) => 
-                  f.url && 
-                  f.vcodec !== "none" && 
-                  f.acodec !== "none" &&
-                  (f.height || 0) <= targetHeight
+                const videoFormats = info.formats.filter((f: any) =>
+                  f.url && f.vcodec !== "none" && f.acodec !== "none" && (f.height || 0) <= targetHeight
                 );
-                
                 if (videoFormats.length > 0) {
                   videoFormats.sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
                   chosenUrl = videoFormats[0].url;
                   chosenExt = videoFormats[0].ext || "mp4";
                 } else {
-                  // Fallback to any video format with video URLs
                   const anyVideo = info.formats.filter((f: any) => f.url && f.vcodec !== "none");
                   if (anyVideo.length > 0) {
                     anyVideo.sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
@@ -302,46 +452,31 @@ async function startServer() {
 
             if (chosenUrl) {
               const safeFilename = `${cleanTitle}.${downloadMode === "audio" ? "mp3" : chosenExt}`;
-              console.log(`yt-dlp successfully resolved. Direct cdn url: ${chosenUrl.substring(0, 60)}...`);
+              console.log(`yt-dlp resolved URL: ${chosenUrl.substring(0, 80)}...`);
               return res.json({
                 status: "stream",
-                url: `/api/stream?url=${encodeURIComponent(chosenUrl)}&filename=${encodeURIComponent(safeFilename)}`
+                url: `/api/stream?url=${encodeURIComponent(chosenUrl)}&filename=${encodeURIComponent(safeFilename)}`,
               });
             }
           }
         } catch (ytDlpError: any) {
-          console.warn("yt-dlp primary extraction failed, trying Cobalt API fallback...", ytDlpError.message);
+          console.warn("yt-dlp extraction failed, falling back to Cobalt:", ytDlpError.message);
         }
       }
 
-      // Strategy B: Cobalt API Fallback
+      // ── Strategy B: Cobalt API Fallback ──────────────────────────────────
       console.log("Triggering Cobalt API fallback process...");
-      const endpoints = [
-        "https://api.cobalt.tools/api/json",
-        "https://api.cobalt.tools/",
-        "https://co.wukko.me/api/json",
-        "https://co.wukko.me/",
-        "https://cobalt.api.red.velvet.cafe/api/json",
-        "https://cobalt.api.red.velvet.cafe/",
-        "https://cobalt-api.kwi.mobi/",
-        "https://co.bune.city/",
-        "https://co.e9.ms/",
-        "https://cobalt.dark-underground.xyz/",
-        "https://cobalt.rotur.dev/",
-        "https://co.vxtwitter.com/",
-        "https://cobalt.rip/"
-      ];
+      const endpoints = await getWorkingCobaltInstances(detectedPlatform);
 
-      const payloads = [];
-      const modernPayload: any = { url, filenamePattern: "pretty" };
+      // Build payload variants: v10 modern → legacy → minimal
+      const modernPayload: any = { url, filenameStyle: "pretty" };
       if (downloadMode === "audio") {
         modernPayload.downloadMode = "audio";
         modernPayload.audioFormat = audioFormat || "mp3";
       } else {
-        modernPayload.downloadMode = "video";
+        modernPayload.downloadMode = "auto";
         modernPayload.videoQuality = videoQuality || "1080";
       }
-      payloads.push(modernPayload);
 
       const legacyPayload: any = { url, filenamePattern: "pretty" };
       if (downloadMode === "audio") {
@@ -351,91 +486,148 @@ async function startServer() {
         legacyPayload.audioOnly = false;
         legacyPayload.videoQuality = videoQuality || "1080";
       }
-      payloads.push(legacyPayload);
-      payloads.push({ url });
 
-      let successData = null;
-      let lastError = null;
+      const payloads = [modernPayload, legacyPayload, { url }];
 
-      endpointLoop: for (const endpoint of endpoints) {
-        for (const payload of payloads) {
-          try {
-            console.log(`Trying Cobalt endpoint: ${endpoint}`);
-            const { status, ok, data, errText } = await new Promise<any>((resolve) => {
-              const parsedUrl = new URL(endpoint);
-              const req = https.request(parsedUrl, {
-                method: "POST",
-                headers: {
-                  "Accept": "application/json",
-                  "Content-Type": "application/json",
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                },
-                rejectUnauthorized: false
-              }, (res) => {
-                let body = "";
-                res.on("data", chunk => body += chunk);
-                res.on("end", () => {
-                  if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+      let successData: any = null;
+      let lastError: Error | null = null;
+
+      // Helper: POST to a single Cobalt URL with timeout
+      function postToCobalt(
+        targetUrl: string,
+        payload: any
+      ): Promise<{ ok: boolean; status?: number; data?: any; errText?: string }> {
+        return new Promise((resolve) => {
+          let settled = false;
+          const timer = setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              req2.destroy();
+              resolve({ ok: false, errText: "Timeout" });
+            }
+          }, 8000);
+
+          const parsedUrl = new URL(targetUrl);
+          const bodyStr = JSON.stringify(payload);
+          const req2 = https.request(
+            parsedUrl,
+            {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(bodyStr),
+                "User-Agent":
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              },
+              rejectUnauthorized: false,
+            },
+            (res2) => {
+              let respBody = "";
+              res2.on("data", (chunk) => (respBody += chunk));
+              res2.on("end", () => {
+                if (!settled) {
+                  settled = true;
+                  clearTimeout(timer);
+                  if (res2.statusCode && res2.statusCode >= 200 && res2.statusCode < 300) {
                     try {
-                      resolve({ status: res.statusCode, ok: true, data: JSON.parse(body) });
-                    } catch (e) {
-                      resolve({ status: res.statusCode, ok: false, errText: "Parse error" });
+                      resolve({ ok: true, status: res2.statusCode, data: JSON.parse(respBody) });
+                    } catch {
+                      resolve({ ok: false, status: res2.statusCode, errText: "JSON parse error" });
                     }
                   } else {
-                    resolve({ status: res.statusCode, ok: false, errText: body });
+                    resolve({
+                      ok: false,
+                      status: res2.statusCode,
+                      errText: respBody.substring(0, 200),
+                    });
                   }
-                });
-              });
-              req.on("error", (e) => resolve({ ok: false, errText: e.message }));
-              req.write(JSON.stringify(payload));
-              req.end();
-            });
-
-            if (ok) {
-              if (data) {
-                if (data.status === "error") {
-                  lastError = new Error(data.text || "Media extraction failed.");
-                } else if (data.status || data.url || data.picker) {
-                  successData = data;
-                  break endpointLoop;
                 }
-              }
-            } else {
-              lastError = new Error(`Server returned status ${status}: ${errText || "Bad Request"}`);
+              });
             }
-          } catch (err: any) {
-            lastError = err;
+          );
+          req2.on("error", (e) => {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve({ ok: false, errText: e.message });
+            }
+          });
+          req2.write(bodyStr);
+          req2.end();
+        });
+      }
+
+      endpointLoop: for (const endpoint of endpoints.slice(0, 8)) {
+        try {
+          console.log(`Trying Cobalt: ${endpoint}`);
+          const { ok, status, data, errText } = await postToCobalt(endpoint, payloads[0]);
+
+          if (ok && data) {
+            if (data.status === "error") {
+              const errCode = data.error?.code || "";
+              const errMsg =
+                typeof data.error === "string"
+                  ? data.error
+                  : errCode || data.text || "Media extraction failed.";
+
+              // Content-level errors (invalid URL, geo-block, etc.) — no point trying more instances
+              const contentErrors = [
+                "error.api.fetch.empty",
+                "error.api.link.unsupported",
+                "error.api.link.invalid",
+                "error.api.content.unavailable",
+              ];
+              if (contentErrors.some((e) => errCode.startsWith(e))) {
+                lastError = new Error(errMsg);
+                console.warn(`Content error from Cobalt (${errCode}) — stopping search`);
+                break endpointLoop;
+              }
+
+              lastError = new Error(errMsg);
+              console.warn(`Cobalt ${endpoint} returned error: ${errMsg}`);
+            } else if (data.status || data.url || data.picker) {
+              console.log(`Cobalt success from: ${endpoint}`);
+              successData = data;
+              break endpointLoop;
+            }
+          } else {
+            lastError = new Error(`${endpoint} HTTP ${status}: ${errText || "Bad Request"}`);
+            console.warn(`Cobalt ${endpoint} failed: ${lastError.message}`);
           }
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`Cobalt ${endpoint} threw: ${err.message}`);
         }
       }
 
       if (!successData) {
-        throw new Error(lastError ? lastError.message : "All downloader endpoints are currently busy. Please try again in a few seconds.");
+        throw new Error(
+          lastError
+            ? lastError.message
+            : "All downloader endpoints are currently unavailable. Please try again later."
+        );
       }
 
-      // If Cobalt returned a direct url, we proxy stream it to bypass CORS/Referer blocks
+      // Cobalt returned a direct stream URL — proxy it
       if (successData.url) {
-        const cleanTitle = "video";
-        const safeFilename = `${cleanTitle}.${downloadMode === "audio" ? "mp3" : "mp4"}`;
+        const safeFilename = `video.${downloadMode === "audio" ? "mp3" : "mp4"}`;
         return res.json({
           status: "stream",
-          url: `/api/stream?url=${encodeURIComponent(successData.url)}&filename=${encodeURIComponent(safeFilename)}`
+          url: `/api/stream?url=${encodeURIComponent(successData.url)}&filename=${encodeURIComponent(safeFilename)}`,
         });
       }
 
-      // If Cobalt returned a list of items (picker)
+      // Cobalt returned a media picker (carousel / multiple items)
       if (successData.picker) {
         const mappedPicker = successData.picker.map((item: any, idx: number) => {
           const safeFilename = `media_${idx + 1}.${item.type === "video" ? "mp4" : "jpg"}`;
           return {
             ...item,
-            url: `/api/stream?url=${encodeURIComponent(item.url)}&filename=${encodeURIComponent(safeFilename)}`
+            url: `/api/stream?url=${encodeURIComponent(item.url)}&filename=${encodeURIComponent(safeFilename)}`,
           };
         });
-        return res.json({
-          status: "picker",
-          picker: mappedPicker
-        });
+        return res.json({ status: "picker", picker: mappedPicker });
       }
 
       return res.json(successData);
@@ -456,14 +648,24 @@ async function startServer() {
 
     console.log(`Piping media stream: ${url.substring(0, 60)}...`);
 
-    const clientHeaders: Record<string, string> = {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Referer": "https://twitter.com/" // Bypasses some referrer validation checks
-    };
+   const referer =
+  url.includes("instagram")
+    ? "https://www.instagram.com/"
+    : url.includes("twitter") || url.includes("x.com")
+    ? "https://twitter.com/"
+    : url.includes("tiktok")
+    ? "https://www.tiktok.com/"
+    : "https://www.youtube.com/";
 
-    if (req.headers.range) {
-      clientHeaders["range"] = req.headers.range;
-    }
+    const clientHeaders: Record<string, string> = {
+    "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": referer,
+  };
+
+  if (req.headers.range) {
+  clientHeaders["range"] = req.headers.range as string;
+  }
 
     try {
       const parsedUrl = new URL(url);
