@@ -14,6 +14,9 @@ export interface DownloadResult {
   url?: string;
   picker?: PickerItem[];
   text?: string;
+  title?: string;
+  thumb?: string;
+  filename?: string;
   error?: string | { code: string };
 }
 

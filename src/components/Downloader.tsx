@@ -276,15 +276,29 @@ export default function Downloader() {
                 {/* Media Preview Player (if single URL) */}
                 {(result.status === "redirect" || result.status === "stream") && result.url && (
                  <div className="w-full lg:w-80 shrink-0 bg-gray-900 rounded-2xl overflow-hidden aspect-video md:aspect-[9/16] relative flex items-center justify-center border border-gray-800 shadow-inner group">
-                    <video
-                    src={result.url}
-                      controls
-                        playsInline
-                        className="w-full h-full object-contain"
-/>
-                    <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white uppercase backdrop-blur-sm">
-                      <Play className="h-3 w-3 text-blue-400 fill-current" /> Preview
-                    </div>
+                    {mode === "audio" ? (
+                      <div className="w-full p-6 text-center space-y-4">
+                        <div className="w-16 h-16 rounded-full bg-blue-500/20 text-blue-400 mx-auto flex items-center justify-center">
+                          <Play className="h-8 w-8 fill-current ml-1" />
+                        </div>
+                        <span className="text-xs font-semibold text-gray-300 block">Audio Preview (MP3)</span>
+                        <audio src={result.url} controls className="w-full" />
+                      </div>
+                    ) : (
+                      <>
+                        <video
+                          src={result.url}
+                          poster={result.thumb}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          className="w-full h-full object-contain"
+                        />
+                        <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white uppercase backdrop-blur-sm">
+                          <Play className="h-3 w-3 text-blue-400 fill-current" /> Preview
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -294,8 +308,8 @@ export default function Downloader() {
                     <div className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 dark:bg-green-950/40 dark:text-green-400">
                       ✓ Extraction Successful
                     </div>
-                    <h3 className="text-2xl font-semibold font-display tracking-tight text-gray-950 dark:text-white">
-                      Your Download is Ready!
+                    <h3 className="text-2xl font-semibold font-display tracking-tight text-gray-950 dark:text-white truncate">
+                      {result.title ? result.title : "Your Download is Ready!"}
                     </h3>
                     <p className="text-xs text-gray-400 dark:text-gray-500 font-mono break-all">
                       Source: {url}
@@ -306,7 +320,8 @@ export default function Downloader() {
                   {(result.status === "redirect" || result.status === "stream") && result.url && (
                     <div className="space-y-3" id="single-download-actions">
                       <a
-                        href={result.url}
+                        href={`${result.url}&dl=1`}
+                        download={result.filename || "download.mp4"}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="w-full max-w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 px-4 rounded-2xl shadow-md transition-all active:scale-98"
@@ -318,7 +333,7 @@ export default function Downloader() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
                         <button
                           type="button"
-                          onClick={() => handleCopyLink(result.url || "")}
+                          onClick={() => handleCopyLink(`${window.location.origin}${result.url}&dl=1`)}
                           className="flex items-center justify-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-900 font-medium py-2.5 rounded-xl text-xs transition-colors"
                         >
                           {copiedLink ? (
@@ -375,7 +390,8 @@ export default function Downloader() {
                               </div>
                             </div>
                             <a
-                              href={item.url}
+                              href={`${item.url}&dl=1`}
+                              download={`media_${index + 1}.${item.type === "video" ? "mp4" : "jpg"}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white rounded-lg transition-colors dark:bg-blue-950/50 dark:text-blue-400 dark:hover:bg-blue-500 dark:hover:text-white"

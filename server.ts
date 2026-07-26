@@ -456,6 +456,9 @@ async function startServer() {
               return res.json({
                 status: "stream",
                 url: `/api/stream?url=${encodeURIComponent(chosenUrl)}&filename=${encodeURIComponent(safeFilename)}`,
+                title: info.title || "video",
+                thumb: info.thumbnail || info.thumbnails?.[0]?.url || "",
+                filename: safeFilename,
               });
             }
           }
@@ -559,45 +562,52 @@ async function startServer() {
       }
 
       endpointLoop: for (const endpoint of endpoints.slice(0, 8)) {
-        try {
-          console.log(`Trying Cobalt: ${endpoint}`);
-          const { ok, status, data, errText } = await postToCobalt(endpoint, payloads[0]);
+        for (const payload of payloads) {
+          try {
+            console.log(`Trying Cobalt: ${endpoint} (payload variant ${payloads.indexOf(payload) + 1}/${payloads.length})`);
+            const { ok, status, data, errText } = await postToCobalt(endpoint, payload);
 
-          if (ok && data) {
-            if (data.status === "error") {
-              const errCode = data.error?.code || "";
-              const errMsg =
-                typeof data.error === "string"
-                  ? data.error
-                  : errCode || data.text || "Media extraction failed.";
+            if (ok && data) {
+              if (data.status === "error") {
+                const errCode = data.error?.code || "";
+                const errMsg =
+                  typeof data.error === "string"
+                    ? data.error
+                    : errCode || data.text || "Media extraction failed.";
 
-              // Content-level errors (invalid URL, geo-block, etc.) — no point trying more instances
-              const contentErrors = [
-                "error.api.fetch.empty",
-                "error.api.link.unsupported",
-                "error.api.link.invalid",
-                "error.api.content.unavailable",
-              ];
-              if (contentErrors.some((e) => errCode.startsWith(e))) {
+                // Content-level errors (invalid URL, geo-block, etc.) — no point trying more instances
+                const contentErrors = [
+                  "error.api.fetch.empty",
+                  "error.api.link.unsupported",
+                  "error.api.link.invalid",
+                  "error.api.content.unavailable",
+                ];
+                if (contentErrors.some((e) => errCode.startsWith(e))) {
+                  lastError = new Error(errMsg);
+                  console.warn(`Content error from Cobalt (${errCode}) — stopping search`);
+                  break endpointLoop;
+                }
+
                 lastError = new Error(errMsg);
-                console.warn(`Content error from Cobalt (${errCode}) — stopping search`);
+                console.warn(`Cobalt ${endpoint} returned error: ${errMsg} — trying next payload`);
+                // Try next payload variant
+                continue;
+              } else if (data.status || data.url || data.picker) {
+                console.log(`Cobalt success from: ${endpoint}`);
+                successData = data;
                 break endpointLoop;
               }
-
-              lastError = new Error(errMsg);
-              console.warn(`Cobalt ${endpoint} returned error: ${errMsg}`);
-            } else if (data.status || data.url || data.picker) {
-              console.log(`Cobalt success from: ${endpoint}`);
-              successData = data;
-              break endpointLoop;
+            } else {
+              lastError = new Error(`${endpoint} HTTP ${status}: ${errText || "Bad Request"}`);
+              console.warn(`Cobalt ${endpoint} failed: ${lastError.message}`);
+              // If the endpoint itself is down, don't try more payloads on it
+              break;
             }
-          } else {
-            lastError = new Error(`${endpoint} HTTP ${status}: ${errText || "Bad Request"}`);
-            console.warn(`Cobalt ${endpoint} failed: ${lastError.message}`);
+          } catch (err: any) {
+            lastError = err;
+            console.warn(`Cobalt ${endpoint} threw: ${err.message}`);
+            break; // move to next endpoint
           }
-        } catch (err: any) {
-          lastError = err;
-          console.warn(`Cobalt ${endpoint} threw: ${err.message}`);
         }
       }
 
@@ -615,6 +625,8 @@ async function startServer() {
         return res.json({
           status: "stream",
           url: `/api/stream?url=${encodeURIComponent(successData.url)}&filename=${encodeURIComponent(safeFilename)}`,
+          title: successData.filename || "video",
+          filename: safeFilename,
         });
       }
 
@@ -639,33 +651,36 @@ async function startServer() {
     }
   });
 
-  // Range-aware Streaming Proxy Endpoint (bypasses CORS & hotlink blocks, supports fast native seek)
+  // Range-aware Streaming Proxy Endpoint (bypasses CORS & hotlink blocks, supports fast native seek & inline preview)
   app.get("/api/stream", (req, res) => {
-    const { url, filename } = req.query;
+    const { url, filename, dl } = req.query;
     if (!url || typeof url !== "string") {
       return res.status(400).send("Missing URL parameter");
     }
 
-    console.log(`Piping media stream: ${url.substring(0, 60)}...`);
+    const isDownload = dl === "1" || dl === "true";
+    const safeFilename = (filename as string) || "download.mp4";
 
-   const referer =
-  url.includes("instagram")
-    ? "https://www.instagram.com/"
-    : url.includes("twitter") || url.includes("x.com")
-    ? "https://twitter.com/"
-    : url.includes("tiktok")
-    ? "https://www.tiktok.com/"
-    : "https://www.youtube.com/";
+    console.log(`Piping media stream (${isDownload ? "DOWNLOAD" : "PREVIEW"}): ${url.substring(0, 60)}...`);
+
+    const referer =
+      url.includes("instagram")
+        ? "https://www.instagram.com/"
+        : url.includes("twitter") || url.includes("x.com")
+        ? "https://twitter.com/"
+        : url.includes("tiktok")
+        ? "https://www.tiktok.com/"
+        : "https://www.youtube.com/";
 
     const clientHeaders: Record<string, string> = {
-    "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": referer,
-  };
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Referer": referer,
+    };
 
-  if (req.headers.range) {
-  clientHeaders["range"] = req.headers.range as string;
-  }
+    if (req.headers.range) {
+      clientHeaders["range"] = req.headers.range as string;
+    }
 
     try {
       const parsedUrl = new URL(url);
@@ -676,21 +691,30 @@ async function startServer() {
         if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
           const redirectUrl = response.headers.location;
           console.log("Redirecting stream to:", redirectUrl);
-          // Redirect the client or stream from the new location
-          res.redirect(`/api/stream?url=${encodeURIComponent(redirectUrl)}&filename=${encodeURIComponent(filename as string || "download.mp4")}`);
+          const dlFlag = isDownload ? "&dl=1" : "";
+          res.redirect(`/api/stream?url=${encodeURIComponent(redirectUrl)}&filename=${encodeURIComponent(safeFilename)}${dlFlag}`);
           return;
         }
 
-        // Forward matching status & headers for video seekability
-        res.writeHead(response.statusCode || 200, {
-          "Content-Disposition": `attachment; filename="${filename || "download.mp4"}"`,
+        const headers: Record<string, string> = {
           "Content-Type": response.headers["content-type"] || "video/mp4",
-          "Content-Length": response.headers["content-length"] || "",
-          "Content-Range": response.headers["content-range"] || "",
           "Accept-Ranges": response.headers["accept-ranges"] || "bytes",
-          "Cache-Control": "public, max-age=3600"
-        });
+          "Cache-Control": "public, max-age=3600",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "Range",
+          "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+        };
+        // Only include Content-Length and Content-Range if they are present and non-empty
+        if (response.headers["content-length"]) headers["Content-Length"] = response.headers["content-length"];
+        if (response.headers["content-range"]) headers["Content-Range"] = response.headers["content-range"];
 
+        if (isDownload) {
+          headers["Content-Disposition"] = `attachment; filename="${safeFilename}"`;
+        } else {
+          headers["Content-Disposition"] = `inline; filename="${safeFilename}"`;
+        }
+
+        res.writeHead(response.statusCode || 200, headers);
         response.pipe(res);
       });
 
@@ -763,9 +787,9 @@ async function startServer() {
         `;
       }
 
-      // Call Gemini 3.5 Flash
+      // Call Gemini 2.0 Flash
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.0-flash",
         contents: prompt,
         config: mode === "social-bundle" ? { responseMimeType: "application/json" } : undefined,
       });
