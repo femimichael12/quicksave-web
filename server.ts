@@ -393,24 +393,16 @@ async function startServer() {
           if (info) {
             const cleanTitle = (info.title || "video").replace(/[^a-zA-Z0-9_.-]/g, "_").substring(0, 50);
 
-            // Carousel / playlist
+            // Carousel / playlist — use /api/media for each entry
             if (info._type === "playlist" || (info.entries && info.entries.length > 0)) {
               const entries = info.entries || [];
               const picker = entries.map((entry: any, index: number) => {
-                let entryUrl = entry.url;
-                let entryExt = entry.ext || "mp4";
-                if (entry.formats && entry.formats.length > 0) {
-                  const targetHeight = parseInt(videoQuality) || 1080;
-                  const validFormats = entry.formats.filter((f: any) => f.url && f.vcodec !== "none" && (f.height || 0) <= targetHeight);
-                  if (validFormats.length > 0) {
-                    validFormats.sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
-                    entryUrl = validFormats[0].url;
-                    entryExt = validFormats[0].ext || "mp4";
-                  }
-                }
+                const entryExt = entry.ext || "mp4";
                 const safeFilename = `${cleanTitle}_part${index + 1}.${entryExt}`;
+                // Use the entry's webpage_url or url as src for yt-dlp re-extraction
+                const entrySrc = entry.webpage_url || entry.url || url;
                 return {
-                  url: `/api/stream?url=${encodeURIComponent(entryUrl || "")}&filename=${encodeURIComponent(safeFilename)}`,
+                  url: `/api/media?src=${encodeURIComponent(entrySrc)}&quality=${videoQuality || "1080"}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`,
                   type: entry.vcodec === "none" ? "audio" : "video",
                   thumb: entry.thumbnail || entry.thumbnails?.[0]?.url || info.thumbnail || "",
                 };
@@ -418,49 +410,17 @@ async function startServer() {
               return res.json({ status: "picker", picker });
             }
 
-            // Single media
-            let chosenUrl = info.url;
-            let chosenExt = info.ext || "mp4";
-
-            if (info.formats && info.formats.length > 0) {
-              if (downloadMode === "audio") {
-                const audioFormats = info.formats.filter((f: any) => f.vcodec === "none" && f.url);
-                if (audioFormats.length > 0) {
-                  audioFormats.sort((a: any, b: any) => (b.abr || 0) - (a.abr || 0));
-                  chosenUrl = audioFormats[0].url;
-                  chosenExt = audioFormats[0].ext || "mp3";
-                }
-              } else {
-                const targetHeight = parseInt(videoQuality) || 1080;
-                const videoFormats = info.formats.filter((f: any) =>
-                  f.url && f.vcodec !== "none" && f.acodec !== "none" && (f.height || 0) <= targetHeight
-                );
-                if (videoFormats.length > 0) {
-                  videoFormats.sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
-                  chosenUrl = videoFormats[0].url;
-                  chosenExt = videoFormats[0].ext || "mp4";
-                } else {
-                  const anyVideo = info.formats.filter((f: any) => f.url && f.vcodec !== "none");
-                  if (anyVideo.length > 0) {
-                    anyVideo.sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
-                    chosenUrl = anyVideo[0].url;
-                    chosenExt = anyVideo[0].ext || "mp4";
-                  }
-                }
-              }
-            }
-
-            if (chosenUrl) {
-              const safeFilename = `${cleanTitle}.${downloadMode === "audio" ? "mp3" : chosenExt}`;
-              console.log(`yt-dlp resolved URL: ${chosenUrl.substring(0, 80)}...`);
-              return res.json({
-                status: "stream",
-                url: `/api/stream?url=${encodeURIComponent(chosenUrl)}&filename=${encodeURIComponent(safeFilename)}`,
-                title: info.title || "video",
-                thumb: info.thumbnail || info.thumbnails?.[0]?.url || "",
-                filename: safeFilename,
-              });
-            }
+            // Single media — return /api/media pointing to the ORIGINAL URL
+            // yt-dlp will re-extract and stream it fresh at request time (avoids expired CDN URLs)
+            const safeFilename = `${cleanTitle}.${downloadMode === "audio" ? "mp3" : "mp4"}`;
+            console.log(`yt-dlp metadata OK — routing to /api/media for: ${url.substring(0, 60)}`);
+            return res.json({
+              status: "stream",
+              url: `/api/media?src=${encodeURIComponent(url)}&quality=${videoQuality || "1080"}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`,
+              title: info.title || "video",
+              thumb: info.thumbnail || info.thumbnails?.[0]?.url || "",
+              filename: safeFilename,
+            });
           }
         } catch (ytDlpError: any) {
           console.warn("yt-dlp extraction failed, falling back to Cobalt:", ytDlpError.message);
@@ -651,7 +611,111 @@ async function startServer() {
     }
   });
 
-  // Range-aware Streaming Proxy Endpoint (bypasses CORS & hotlink blocks, supports fast native seek & inline preview)
+  // Direct yt-dlp Media Streaming Endpoint
+  // Spawns yt-dlp with -o - to pipe audio/video directly to the browser.
+  // This is the primary streaming method for YouTube, TikTok, Instagram, Twitter.
+  // Advantages over CDN proxy: handles auth/cookies, no URL expiry, correct format/quality selection.
+  app.get("/api/media", (req, res) => {
+    const { src, quality, mode, filename, dl } = req.query;
+
+    if (!src || typeof src !== "string") {
+      return res.status(400).send("Missing src parameter");
+    }
+
+    if (!isYtDlpAvailable) {
+      return res.status(503).send("yt-dlp not available for direct media streaming");
+    }
+
+    const isDownload = dl === "1" || dl === "true";
+    const isAudio = mode === "audio";
+    const targetHeight = parseInt(quality as string) || 1080;
+    const safeFilename = (filename as string) || (isAudio ? "audio.mp3" : "video.mp4");
+
+    // Build format selector string — prioritise pre-muxed MP4 (no ffmpeg needed)
+    // Falls back to best available if target quality not found
+    const formatStr = isAudio
+      ? "bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio"
+      : `best[height<=${targetHeight}][ext=mp4]/best[ext=mp4]/bestvideo[height<=${targetHeight}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best`;
+
+    const args: string[] = [
+      "--no-playlist",
+      "--no-check-certificate",
+      "--no-warnings",
+      "-f", formatStr,
+      "-o", "-",  // pipe output to stdout
+    ];
+
+    // Inject Instagram session cookie if available
+    const cookieFile = getInstagramCookieFile();
+    if (cookieFile && src.includes("instagram")) {
+      args.push("--cookies", cookieFile);
+    }
+
+    args.push(src);
+
+    console.log(`/api/media: yt-dlp streaming ${isAudio ? "audio" : `video@${targetHeight}p`} for ${src.substring(0, 60)}...`);
+    const proc = spawn(ytDlpPath, args, { windowsHide: true });
+
+    let dataStarted = false;
+
+    proc.stdout.on("data", (chunk: Buffer) => {
+      if (!dataStarted) {
+        dataStarted = true;
+        // Send headers on first data chunk
+        const contentType = isAudio ? "audio/mpeg" : "video/mp4";
+        const disposition = isDownload
+          ? `attachment; filename="${safeFilename}"`
+          : `inline; filename="${safeFilename}"`;
+        res.writeHead(200, {
+          "Content-Type": contentType,
+          "Content-Disposition": disposition,
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-store",
+          "Transfer-Encoding": "chunked",
+          "X-Content-Type-Options": "nosniff",
+        });
+      }
+      res.write(chunk);
+    });
+
+    proc.stdout.on("end", () => {
+      if (!dataStarted && !res.headersSent) {
+        res.status(502).send("yt-dlp produced no media output. The URL may be unavailable or geo-blocked.");
+      } else {
+        res.end();
+      }
+    });
+
+    proc.stderr.on("data", (data: Buffer) => {
+      const msg = data.toString();
+      // Only log actual errors, not progress lines
+      if (!msg.startsWith("[download]") && !msg.startsWith("[info]") && !msg.startsWith("[youtube]")) {
+        console.error("yt-dlp media stderr:", msg.substring(0, 300));
+      }
+    });
+
+    proc.on("error", (err: Error) => {
+      console.error("yt-dlp spawn error:", err);
+      if (!res.headersSent) {
+        res.status(500).send("Failed to start yt-dlp media process");
+      }
+    });
+
+    proc.on("close", (code: number | null) => {
+      console.log(`/api/media: yt-dlp exited with code ${code}`);
+      if (!res.writableEnded) res.end();
+    });
+
+    // If client disconnects (e.g. user navigates away), kill yt-dlp
+    res.on("close", () => {
+      if (!proc.killed) {
+        proc.kill("SIGTERM");
+      }
+    });
+  });
+
+  // CDN Proxy Streaming Endpoint (used for Cobalt-returned CDN URLs)
+  // Range-aware: supports seek & inline preview for direct CDN links
   app.get("/api/stream", (req, res) => {
     const { url, filename, dl } = req.query;
     if (!url || typeof url !== "string") {
