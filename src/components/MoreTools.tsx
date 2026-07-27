@@ -11,7 +11,7 @@ interface UtilityTool {
   name: string;
   desc: string;
   badge: string;
-  status: "live" | "planned";
+  status: "active" | "offline";
   color: string;
 }
 
@@ -23,28 +23,28 @@ export default function MoreTools() {
       name: "Threads Video Downloader",
       desc: "Save HD video streams, text updates, and image carousels from Meta's Threads network in one tap.",
       badge: "FREE",
-      status: "live",
+      status: "offline",
       color: "bg-neutral-900 text-white dark:bg-neutral-800"
     },
     {
       name: "Facebook Video Downloader",
       desc: "Seamlessly extract Facebook videos with audio synchronized, bypassing standard dash streams limitations.",
       badge: "LIVE",
-      status: "live",
+      status: "offline",
       color: "bg-orange-500 text-white"
     },
     {
       name: "TikTok No-Watermark Saver",
       desc: "Download high-speed direct links to clean MP4 video files from TikTok without any brand overlays.",
       badge: "BETA",
-      status: "live",
+      status: "active",
       color: "bg-teal-500 text-white"
     },
     {
       name: "Pinterest Media Downloader",
       desc: "Save animated GIFs, image pins, and story videos straight to your local disk in original upload quality.",
       badge: "PLANNED",
-      status: "planned",
+      status: "offline",
       color: "bg-rose-600 text-white"
     }
   ];
@@ -92,9 +92,17 @@ export default function MoreTools() {
                     <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tool.color}`}>
                       {tool.badge}
                     </span>
-                    <span className="text-xs font-semibold text-gray-400 font-mono">
-                      {tool.status === "live" ? "● ACTIVE" : "○ PLANNED"}
-                    </span>
+                    {tool.status === "active" ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-500 dark:text-emerald-400 font-mono">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        ACTIVE
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 dark:text-gray-500 font-mono">
+                        <span className="h-1.5 w-1.5 rounded-full bg-gray-400 dark:bg-gray-600" />
+                        OFFLINE
+                      </span>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <h4 className="font-semibold font-display text-gray-950 dark:text-white text-base">
@@ -107,11 +115,15 @@ export default function MoreTools() {
                 </div>
 
                 <div className="pt-6 border-t border-gray-50 mt-4 dark:border-gray-800 flex items-center justify-between">
-                  <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-                    {tool.status === "live" ? "Open Downloader" : "Planned Feature"}
-                    {tool.status === "live" && <ExternalLink className="h-3.5 w-3.5" />}
+                  <span className={`text-xs font-semibold flex items-center gap-1.5 ${tool.status === "active" ? "text-blue-600 dark:text-blue-400" : "text-gray-400 dark:text-gray-500"}`}>
+                    {tool.status === "active" ? "Open Downloader" : "Offline"}
+                    {tool.status === "active" && <ExternalLink className="h-3.5 w-3.5" />}
                   </span>
-                  <button className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-50 hover:bg-blue-50 text-gray-400 hover:text-blue-600 dark:bg-gray-950 dark:hover:bg-blue-950/40">
+                  <button className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                    tool.status === "active" 
+                      ? "bg-gray-50 hover:bg-blue-50 text-gray-400 hover:text-blue-600 dark:bg-gray-950 dark:hover:bg-blue-950/40" 
+                      : "bg-gray-50 text-gray-300 dark:bg-gray-950 dark:text-gray-700 cursor-not-allowed"
+                  }`}>
                     <ArrowRight className="h-4 w-4" />
                   </button>
                 </div>
