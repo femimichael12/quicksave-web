@@ -196,7 +196,6 @@ async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "yo
                 "https://blossom.imput.net",
                 "https://nachos.imput.net",
                 "https://sunny.imput.net",
-                "https://api.cobalt.liubquanti.click",
                 "https://kitty.tame.gg",
               ]);
 
@@ -238,12 +237,13 @@ async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "yo
     console.warn("Failed to fetch working instances from cobalt.directory:", error.message);
   }
 
-  // Static fallback — only open (non-JWT) Cobalt instances as of 2026-07
+  // Static fallback — open (non-JWT) Cobalt instances
   const fallbackList = [
+    "https://api.cobalt.liubquanti.click",
     "https://dog.kittycat.boo",
     "https://cobaltapi.kittycat.boo",
   ];
-  console.log("Using hardcoded Cobalt fallback list (non-JWT only).");
+  console.log("Using hardcoded Cobalt fallback list.");
   return fallbackList;
 }
 
@@ -286,13 +286,21 @@ function getMediaInfo(url: string): Promise<any> {
       console.log("Using Instagram session cookie from INSTAGRAM_SESSION_COOKIE env variable");
     }
 
+    const isYoutube = /youtube\.com|youtu\.be/.test(url);
+
     args.push(
       "--dump-single-json",
       "--no-playlist",
       "--ignore-errors",
       "--no-check-certificate",
-      url
+      "--js-runtimes", "node"
     );
+
+    if (isYoutube) {
+      args.push("--extractor-args", "youtube:player_client=web_embedded,android");
+    }
+
+    args.push(url);
 
     console.log(`Running: ${ytDlpPath} ${args.join(" ")}`);
     const proc = spawn(ytDlpPath, args, { windowsHide: true });
@@ -492,12 +500,20 @@ async function startServer() {
                 if (!settled) {
                   settled = true;
                   clearTimeout(timer);
+                  let parsedJson: any = null;
+                  try {
+                    parsedJson = JSON.parse(respBody);
+                  } catch (_) {}
+
                   if (res2.statusCode && res2.statusCode >= 200 && res2.statusCode < 300) {
-                    try {
-                      resolve({ ok: true, status: res2.statusCode, data: JSON.parse(respBody) });
-                    } catch {
+                    if (parsedJson) {
+                      resolve({ ok: true, status: res2.statusCode, data: parsedJson });
+                    } else {
                       resolve({ ok: false, status: res2.statusCode, errText: "JSON parse error" });
                     }
+                  } else if (parsedJson) {
+                    // Cobalt returns JSON errors with HTTP 400
+                    resolve({ ok: true, status: res2.statusCode, data: parsedJson });
                   } else {
                     resolve({
                       ok: false,
@@ -521,19 +537,26 @@ async function startServer() {
         });
       }
 
-      endpointLoop: for (const endpoint of endpoints.slice(0, 8)) {
+      endpointLoop: for (const endpoint of endpoints.slice(0, 10)) {
         for (const payload of payloads) {
           try {
             console.log(`Trying Cobalt: ${endpoint} (payload variant ${payloads.indexOf(payload) + 1}/${payloads.length})`);
             const { ok, status, data, errText } = await postToCobalt(endpoint, payload);
 
             if (ok && data) {
-              if (data.status === "error") {
-                const errCode = data.error?.code || "";
+              if (data.status === "error" || data.error) {
+                const errCode = data.error?.code || (typeof data.error === "string" ? data.error : "");
                 const errMsg =
                   typeof data.error === "string"
                     ? data.error
                     : errCode || data.text || "Media extraction failed.";
+
+                // Instance-level authentication/bot errors (e.g. YouTube login required on instance) — try next instance
+                if (errCode.includes("youtube.login") || errCode.includes("auth.jwt") || errCode.includes("youtube.bot")) {
+                  lastError = new Error("YouTube authentication or login protection triggered on downloader instance.");
+                  console.warn(`Cobalt ${endpoint} returned instance restriction (${errCode}) — trying next instance`);
+                  break; // break payload loop, go to next endpoint
+                }
 
                 // Content-level errors (invalid URL, geo-block, etc.) — no point trying more instances
                 const contentErrors = [
@@ -550,7 +573,6 @@ async function startServer() {
 
                 lastError = new Error(errMsg);
                 console.warn(`Cobalt ${endpoint} returned error: ${errMsg} — trying next payload`);
-                // Try next payload variant
                 continue;
               } else if (data.status || data.url || data.picker) {
                 console.log(`Cobalt success from: ${endpoint}`);
@@ -572,11 +594,11 @@ async function startServer() {
       }
 
       if (!successData) {
-        throw new Error(
-          lastError
-            ? lastError.message
-            : "All downloader endpoints are currently unavailable. Please try again later."
-        );
+        let finalErrorMsg = lastError ? lastError.message : "All downloader endpoints are currently unavailable. Please try again later.";
+        if (finalErrorMsg.includes("youtube.login") || finalErrorMsg.includes("YouTube authentication")) {
+          finalErrorMsg = "YouTube video extraction is currently restricted or requires sign-in on public servers. Please try a different video or try again shortly.";
+        }
+        throw new Error(finalErrorMsg);
       }
 
       // Cobalt returned a direct stream URL — proxy it
@@ -637,13 +659,20 @@ async function startServer() {
       ? "bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio"
       : `best[height<=${targetHeight}][ext=mp4]/best[ext=mp4]/bestvideo[height<=${targetHeight}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best`;
 
+    const isYoutube = /youtube\.com|youtu\.be/.test(src);
+
     const args: string[] = [
       "--no-playlist",
       "--no-check-certificate",
       "--no-warnings",
+      "--js-runtimes", "node",
       "-f", formatStr,
       "-o", "-",  // pipe output to stdout
     ];
+
+    if (isYoutube) {
+      args.push("--extractor-args", "youtube:player_client=web_embedded,android");
+    }
 
     // Inject Instagram session cookie if available
     const cookieFile = getInstagramCookieFile();
