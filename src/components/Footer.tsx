@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Facebook, Twitter, Award, Sparkles, Youtube, Heart, ExternalLink } from "lucide-react";
+import { Facebook, Twitter, Award, Sparkles, Youtube, ExternalLink } from "lucide-react";
 
 export default function Footer({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const currentYear = new Date().getFullYear();
@@ -119,9 +119,6 @@ export default function Footer({ setActiveTab }: { setActiveTab: (tab: string) =
 
         <div className="border-t border-gray-200 mt-12 pt-8 flex flex-col md:flex-row items-center justify-between text-xs text-gray-400 dark:border-gray-900 dark:text-gray-500" id="footer-bottom-bar">
           <p>© {currentYear} FemiMichael Technologies LLP. All Rights Reserved.</p>
-          <p className="flex items-center gap-1 mt-2 md:mt-0">
-            Made with <Heart className="h-3 w-3 text-red-500 fill-current" /> for social creators. Powered by Gemini.
-          </p>
         </div>
       </div>
     </footer>
