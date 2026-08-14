@@ -94,13 +94,13 @@ export default function BlogView() {
           >
             {/* Blog Header */}
             <div className="text-center space-y-3 max-w-2xl mx-auto" id="blog-header">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
                 <BookOpen className="h-3 w-3" /> Resources & Insights
               </span>
-              <h1 className="text-2xl md:text-3xl font-semibold font-display tracking-tight text-gray-950 dark:text-white">
+              <h1 className="text-2xl md:text-3xl font-semibold font-display tracking-tight text-gray-950">
                 The QuickSave Creator Hub
               </h1>
-              <p className="text-gray-500 dark:text-gray-400 text-sm md:text-base leading-relaxed font-light">
+              <p className="text-gray-500 text-sm md:text-base leading-relaxed font-light">
                 Stay updated with the latest social media guides, technical insights, and optimization tips for managing and downloading social content.
               </p>
             </div>
@@ -110,7 +110,7 @@ export default function BlogView() {
               {BLOG_POSTS.map((post) => (
                 <article
                   key={post.id}
-                  className="flex flex-col overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-xs dark:border-gray-800 dark:bg-gray-900 transition-all hover:shadow-md cursor-pointer"
+                  className="flex flex-col overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-xs transition-all hover:shadow-md cursor-pointer"
                   onClick={() => setSelectedPost(post)}
                   id={`blog-card-${post.id}`}
                 >
@@ -121,12 +121,12 @@ export default function BlogView() {
                       className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
                       referrerPolicy="no-referrer"
                     />
-                    <div className="absolute top-4 left-4 rounded-full bg-white/90 backdrop-blur-xs px-3 py-1 text-xs font-semibold text-blue-600 dark:bg-gray-900/90 dark:text-blue-400">
+                    <div className="absolute top-4 left-4 rounded-full bg-white/90 backdrop-blur-xs px-3 py-1 text-xs font-semibold text-blue-600">
                       {post.category}
                     </div>
                   </div>
                   <div className="flex flex-1 flex-col p-6 space-y-4">
-                    <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500 font-mono">
+                    <div className="flex items-center gap-3 text-xs text-gray-400 font-mono">
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3.5 w-3.5" /> {post.date}
                       </span>
@@ -136,14 +136,14 @@ export default function BlogView() {
                       </span>
                     </div>
                     <div className="space-y-2 flex-grow">
-                      <h3 className="text-base font-semibold font-display text-gray-950 dark:text-white leading-snug hover:text-blue-600 transition-colors">
+                      <h3 className="text-base font-semibold font-display text-gray-950 leading-snug hover:text-blue-600 transition-colors">
                         {post.title}
                       </h3>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-3 leading-relaxed font-light">
+                      <p className="text-xs text-gray-500 line-clamp-3 leading-relaxed font-light">
                         {post.excerpt}
                       </p>
                     </div>
-                    <div className="pt-2 border-t border-gray-50 dark:border-gray-800 flex items-center justify-between text-xs font-semibold text-blue-600 dark:text-blue-400">
+                    <div className="pt-2 border-t border-gray-50 flex items-center justify-between text-xs font-semibold text-blue-600">
                       <span>Read Full Article</span>
                       <ArrowRight className="h-4 w-4" />
                     </div>
@@ -164,7 +164,7 @@ export default function BlogView() {
             {/* Back Button */}
             <button
               onClick={() => setSelectedPost(null)}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white cursor-pointer"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-gray-900 cursor-pointer"
               id="blog-back-btn"
             >
               <ArrowLeft className="h-4 w-4" /> Back to Articles
@@ -178,18 +178,18 @@ export default function BlogView() {
                 className="h-full w-full object-cover"
                 referrerPolicy="no-referrer"
               />
-              <div className="absolute top-6 left-6 rounded-full bg-white/90 backdrop-blur-xs px-4 py-1.5 text-xs font-semibold text-blue-600 dark:bg-gray-900/90 dark:text-blue-400">
+              <div className="absolute top-6 left-6 rounded-full bg-white/90 backdrop-blur-xs px-4 py-1.5 text-xs font-semibold text-blue-600">
                 {selectedPost.category}
               </div>
             </div>
 
             {/* Article Header */}
             <div className="space-y-4" id="article-heading-block">
-              <h1 className="text-2xl md:text-3xl font-semibold font-display tracking-tight text-gray-950 dark:text-white leading-tight">
+              <h1 className="text-2xl md:text-3xl font-semibold font-display tracking-tight text-gray-950 leading-tight">
                 {selectedPost.title}
               </h1>
               
-              <div className="flex flex-wrap items-center gap-4 md:gap-6 text-xs text-gray-500 dark:text-gray-400 font-mono border-y border-gray-100/80 py-3 dark:border-gray-800">
+              <div className="flex flex-wrap items-center gap-4 md:gap-6 text-xs text-gray-500 font-mono border-y border-gray-100/80 py-3">
                 <span className="flex items-center gap-1.5">
                   <User className="h-4 w-4 text-blue-500" /> By {selectedPost.author}
                 </span>
@@ -205,7 +205,7 @@ export default function BlogView() {
             </div>
 
             {/* Article Content */}
-            <div className="space-y-6 text-sm md:text-base text-gray-600 dark:text-gray-300 leading-relaxed font-light" id="article-body-content">
+            <div className="space-y-6 text-sm md:text-base text-gray-600 leading-relaxed font-light" id="article-body-content">
               {selectedPost.content.map((paragraph, index) => (
                 <p key={index} className="indent-0">
                   {paragraph}
@@ -214,10 +214,10 @@ export default function BlogView() {
             </div>
 
             {/* Newsletter or Info Callout Card */}
-            <div className="rounded-3xl border border-blue-50/50 bg-blue-50/20 p-6 md:p-8 dark:border-blue-950/40 dark:bg-blue-950/10 flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div className="rounded-3xl border border-blue-50/50 bg-blue-50/20 p-6 md:p-8 flex flex-col sm:flex-row items-center justify-between gap-6">
               <div className="space-y-2 text-center sm:text-left">
-                <h4 className="font-semibold font-display text-gray-950 dark:text-white">Did this guide help you?</h4>
-                <p className="text-xs text-gray-500 dark:text-gray-400 max-w-md font-light">
+                <h4 className="font-semibold font-display text-gray-950">Did this guide help you?</h4>
+                <p className="text-xs text-gray-500 max-w-md font-light">
                   Share this article with fellow creators or bookmark QuickSave for easy, instant, and unlimited video downloads whenever you need them.
                 </p>
               </div>
@@ -242,3 +242,4 @@ export default function BlogView() {
     </div>
   );
 }
+

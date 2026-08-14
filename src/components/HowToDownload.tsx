@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Link, Clipboard, ArrowDownToLine, Monitor, Smartphone, Tablet, Sparkles } from "lucide-react";
+import { Link, Clipboard, ArrowDownToLine, Monitor, Smartphone, Tablet } from "lucide-react";
 import { motion } from "motion/react";
 
 export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: string) => void }) {
@@ -67,12 +67,12 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
     <div className="space-y-16 py-12" id="howto-section">
       
       {/* 3 Step Process */}
-      <section className="rounded-3xl border border-gray-100 bg-white p-8 shadow-sm transition-colors duration-300 dark:border-gray-900 dark:bg-gray-950" id="howto-steps">
+      <section className="rounded-3xl border border-gray-100 bg-white p-8 shadow-sm transition-colors duration-300" id="howto-steps">
         <div className="text-center max-w-3xl mx-auto mb-12">
-          <h2 className="text-2xl md:text-3xl font-semibold font-display tracking-tight text-gray-950 dark:text-white">
+          <h2 className="text-2xl md:text-3xl font-semibold font-display tracking-tight text-gray-950">
             How to Download Social Videos
           </h2>
-          <p className="mt-4 text-base md:text-lg text-gray-500 dark:text-gray-400 font-light">
+          <p className="mt-4 text-base md:text-lg text-gray-500 font-light">
             Downloading videos, Reels, Shorts, and TikToks is an absolute breeze using QuickSave. Just follow these three simple steps:
           </p>
         </div>
@@ -87,11 +87,11 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
                 viewport={{ once: true }}
                 transition={{ duration: 0.4, delay: idx * 0.1 }}
                 key={step.num}
-                className="relative flex flex-col items-center text-center p-6 rounded-2xl border border-gray-100 hover:border-blue-100 hover:bg-blue-50/10 dark:border-gray-900 dark:hover:border-blue-950/40 dark:hover:bg-blue-950/5 group transition-all"
+                className="relative flex flex-col items-center text-center p-6 rounded-2xl border border-gray-100 hover:border-blue-100 hover:bg-blue-50/10 group transition-all"
                 id={`step-card-${step.num}`}
               >
                 {/* Number Badge */}
-                <span className="absolute top-4 left-4 flex h-8 w-8 items-center justify-center rounded-full bg-blue-50 text-sm font-semibold text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
+                <span className="absolute top-4 left-4 flex h-8 w-8 items-center justify-center rounded-full bg-blue-50 text-sm font-semibold text-blue-600">
                   {step.num}
                 </span>
 
@@ -100,10 +100,10 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
                   <Icon className="h-7 w-7" />
                 </div>
 
-                <h3 className="text-lg font-semibold font-display text-gray-950 dark:text-white mb-2">
+                <h3 className="text-lg font-semibold font-display text-gray-950 mb-2">
                   {step.title}
                 </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+                <p className="text-sm text-gray-500 leading-relaxed">
                   {step.desc}
                 </p>
               </motion.div>
@@ -115,10 +115,10 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
       {/* Device Support Guide */}
       <section className="space-y-8" id="howto-devices">
         <div className="text-center max-w-2xl mx-auto">
-          <h2 className="text-2xl md:text-3xl font-semibold font-display tracking-tight text-gray-950 dark:text-white">
+          <h2 className="text-2xl md:text-3xl font-semibold font-display tracking-tight text-gray-950">
             Download Videos on Any Device
           </h2>
-          <p className="mt-3 text-base text-gray-500 dark:text-gray-400 font-light">
+          <p className="mt-3 text-base text-gray-500 font-light">
             QuickSave is fully web-based and runs flawlessly on any platform with a web browser. No software installs required.
           </p>
         </div>
@@ -133,22 +133,22 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
                 viewport={{ once: true }}
                 transition={{ duration: 0.4, delay: idx * 0.1 }}
                 key={device.name}
-                className="flex flex-col bg-white border border-gray-100 rounded-2xl p-6 shadow-sm dark:bg-gray-950 dark:border-gray-900"
+                className="flex flex-col bg-white border border-gray-100 rounded-2xl p-6 shadow-sm"
                 id={`device-card-${idx}`}
               >
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                     <Icon className="h-5 w-5" />
                   </div>
-                  <h3 className="text-base font-semibold font-display text-gray-950 dark:text-white">
+                  <h3 className="text-base font-semibold font-display text-gray-950">
                     {device.name}
                   </h3>
                 </div>
 
                 <ul className="space-y-3 flex-grow">
                   {device.steps.map((stepText, stepIdx) => (
-                    <li key={stepIdx} className="flex gap-2.5 items-start text-sm text-gray-500 dark:text-gray-400 font-light">
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[10px] font-semibold text-gray-700 dark:bg-gray-900 dark:text-gray-400 mt-0.5">
+                    <li key={stepIdx} className="flex gap-2.5 items-start text-sm text-gray-500 font-light">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[10px] font-semibold text-gray-700 mt-0.5">
                         {stepIdx + 1}
                       </span>
                       <span>{stepText}</span>
@@ -197,3 +197,4 @@ export default function HowToDownload({ setActiveTab }: { setActiveTab?: (tab: s
     </div>
   );
 }
+

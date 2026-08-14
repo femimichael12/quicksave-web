@@ -223,13 +223,13 @@ export default function ScreenshotGenerator() {
     <div className="space-y-10 py-4 animate-fade-in" id="screenshot-view-root">
       {/* Page Heading */}
       <div className="text-center space-y-3 max-w-2xl mx-auto" id="screenshot-header">
-       <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-  <Camera className="h-3 w-3" /> Screenshot Studio
-</span>
-        <h1 className="text-2xl md:text-3xl font-semibold font-display tracking-tight text-gray-950 dark:text-white">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+          <Camera className="h-3 w-3" /> Screenshot Studio
+        </span>
+        <h1 className="text-2xl md:text-3xl font-semibold font-display tracking-tight text-gray-950">
           Social Post Screenshot Generator
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 text-sm md:text-base leading-relaxed font-light">
+        <p className="text-gray-500 text-sm md:text-base leading-relaxed font-light">
           Create pixel-perfect, beautifully structured mock posts and download them as high-quality images. Great for marketing, mockup design, and social media planning.
         </p>
       </div>
@@ -237,39 +237,39 @@ export default function ScreenshotGenerator() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8" id="screenshot-generator-grid">
         {/* Controls Column (left 5 columns) */}
         <div className="lg:col-span-5 space-y-6" id="generator-controls">
-          <div className="bg-white rounded-3xl border border-gray-100 p-6 space-y-4 dark:bg-gray-900 dark:border-gray-800 shadow-xs">
-            <h3 className="font-semibold font-display text-gray-950 dark:text-white text-sm border-b border-gray-50 pb-2.5 dark:border-gray-800">
+          <div className="bg-white rounded-3xl border border-gray-100 p-6 space-y-4 shadow-xs">
+            <h3 className="font-semibold font-display text-gray-950 text-sm border-b border-gray-50 pb-2.5">
               Customize Content
             </h3>
             
             {/* Display & User Handle */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">DISPLAY NAME</label>
+                <label className="text-xs font-semibold text-gray-400">DISPLAY NAME</label>
                 <input
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full text-xs rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white"
+                  className="w-full text-xs rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none"
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">USERNAME HANDLE</label>
+                <label className="text-xs font-semibold text-gray-400">USERNAME HANDLE</label>
                 <div className="relative">
-                  <span className="absolute left-2.5 top-2 text-xs font-semibold text-gray-400 dark:text-gray-500">@</span>
+                  <span className="absolute left-2.5 top-2 text-xs font-semibold text-gray-400">@</span>
                   <input
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="w-full text-xs rounded-xl border border-gray-100 bg-gray-50/50 pl-6 pr-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white"
+                    className="w-full text-xs rounded-xl border border-gray-100 bg-gray-50/50 pl-6 pr-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none"
                   />
                 </div>
               </div>
             </div>
 
             {/* Verified options */}
-            <div className="flex items-center justify-between border-t border-gray-50 pt-3 dark:border-gray-800">
-              <span className="text-xs font-bold text-gray-600 dark:text-gray-300">Verified Badge</span>
+            <div className="flex items-center justify-between border-t border-gray-50 pt-3">
+              <span className="text-xs font-bold text-gray-600">Verified Badge</span>
               <div className="flex items-center gap-3">
                 <input
                   type="checkbox"
@@ -281,7 +281,7 @@ export default function ScreenshotGenerator() {
                   <select
                     value={verifiedType}
                     onChange={(e) => setVerifiedType(e.target.value as any)}
-                    className="text-xs rounded-lg border border-gray-100 bg-gray-50 py-1 px-2 text-gray-900 dark:border-gray-800 dark:bg-gray-950 dark:text-white"
+                    className="text-xs rounded-lg border border-gray-100 bg-gray-50 py-1 px-2 text-gray-900"
                   >
                     <option value="blue">Blue Badge</option>
                     <option value="gold">Gold Badge</option>
@@ -292,40 +292,40 @@ export default function ScreenshotGenerator() {
 
             {/* Post Content */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">POST TEXT CONTENT</label>
+              <label className="text-xs font-semibold text-gray-400">POST TEXT CONTENT</label>
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 rows={4}
-                className="w-full text-xs rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white leading-relaxed resize-none"
+                className="w-full text-xs rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none leading-relaxed resize-none"
               />
             </div>
 
             {/* Date and stats */}
-            <div className="grid grid-cols-2 gap-4 border-t border-gray-50 pt-3 dark:border-gray-800">
+            <div className="grid grid-cols-2 gap-4 border-t border-gray-50 pt-3">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">DATE STRING</label>
+                <label className="text-xs font-semibold text-gray-400">DATE STRING</label>
                 <input
                   type="text"
                   value={dateStr}
                   onChange={(e) => setDateStr(e.target.value)}
-                  className="w-full text-xs rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white"
+                  className="w-full text-xs rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none"
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">LIKES COUNT</label>
+                <label className="text-xs font-semibold text-gray-400">LIKES COUNT</label>
                 <input
                   type="text"
                   value={likes}
                   onChange={(e) => setLikes(e.target.value)}
-                  className="w-full text-xs rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white"
+                  className="w-full text-xs rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none"
                 />
               </div>
             </div>
 
             {/* Avatar Selector */}
-            <div className="space-y-2 border-t border-gray-50 pt-3 dark:border-gray-800">
-              <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">SELECT AVATAR</label>
+            <div className="space-y-2 border-t border-gray-50 pt-3">
+              <label className="text-xs font-semibold text-gray-400">SELECT AVATAR</label>
               <div className="flex items-center gap-3">
                 {avatars.map((url, idx) => (
                   <button
@@ -343,7 +343,7 @@ export default function ScreenshotGenerator() {
                 ))}
                 
                 {/* Custom upload button */}
-                <label className="relative flex h-10 w-10 items-center justify-center rounded-full border-2 border-dashed border-gray-200 hover:border-blue-500 cursor-pointer dark:border-gray-700 transition-colors">
+                <label className="relative flex h-10 w-10 items-center justify-center rounded-full border-2 border-dashed border-gray-200 hover:border-blue-500 cursor-pointer transition-colors">
                   <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
                   {customAvatar ? (
                     <img src={customAvatar} alt="Custom" className="h-full w-full rounded-full object-cover" />
@@ -355,11 +355,11 @@ export default function ScreenshotGenerator() {
             </div>
 
             {/* Toggle Preview Theme */}
-            <div className="flex items-center justify-between border-t border-gray-50 pt-3 dark:border-gray-800">
-              <span className="text-xs font-bold text-gray-600 dark:text-gray-300">Dark Mode Post Preview</span>
+            <div className="flex items-center justify-between border-t border-gray-50 pt-3">
+              <span className="text-xs font-bold text-gray-600">Dark Card Output</span>
               <button
                 onClick={() => setIsDarkTheme(!isDarkTheme)}
-                className={`flex h-6 w-11 items-center rounded-full p-0.5 transition-colors focus:outline-none ${
+                className={`flex h-6 w-11 items-center rounded-full p-0.5 transition-colors focus:outline-none cursor-pointer ${
                   isDarkTheme ? "bg-blue-600" : "bg-gray-200"
                 }`}
               >
@@ -376,7 +376,7 @@ export default function ScreenshotGenerator() {
         {/* Live Preview Column (right 7 columns) */}
         <div className="lg:col-span-7 flex flex-col justify-between" id="generator-preview">
           <div className="space-y-6">
-            <h3 className="font-bold text-xs text-gray-400 dark:text-gray-500 uppercase tracking-widest pl-2">
+            <h3 className="font-bold text-xs text-gray-400 uppercase tracking-widest pl-2">
               Live Preview
             </h3>
 
@@ -395,7 +395,7 @@ export default function ScreenshotGenerator() {
                   <img
                     src={customAvatar || avatars[avatarIndex]}
                     alt="Author"
-                    className="h-11 w-11 rounded-full object-cover border border-gray-50 dark:border-slate-800"
+                    className="h-11 w-11 rounded-full object-cover border border-gray-50"
                   />
                   <div className="leading-tight">
                     <h4 className="font-bold text-sm md:text-base flex items-center gap-1">
@@ -414,7 +414,7 @@ export default function ScreenshotGenerator() {
                         </svg>
                       )}
                     </h4>
-                    <p className="text-xs text-gray-400 dark:text-slate-500 font-medium">@{username}</p>
+                    <p className="text-xs text-gray-400 font-medium">@{username}</p>
                   </div>
                 </div>
               </div>
@@ -425,15 +425,15 @@ export default function ScreenshotGenerator() {
               </p>
 
               {/* Post date */}
-              <p className="mt-4 text-xs font-medium text-gray-400 dark:text-slate-500 font-mono">
+              <p className="mt-4 text-xs font-medium text-gray-400 font-mono">
                 {dateStr}
               </p>
 
               {/* Line Divider */}
-              <hr className="my-4 border-gray-100 dark:border-slate-800/80" />
+              <hr className="my-4 border-gray-100" />
 
               {/* Stats counts row */}
-              <div className="flex items-center gap-4 text-xs md:text-sm font-semibold text-gray-400 dark:text-slate-500 font-mono">
+              <div className="flex items-center gap-4 text-xs md:text-sm font-semibold text-gray-400 font-mono">
                 <p>
                   <span className={isDarkTheme ? "text-slate-100" : "text-slate-900"}>{retweets}</span> Retweets
                 </p>
@@ -446,10 +446,10 @@ export default function ScreenshotGenerator() {
               </div>
 
               {/* Line Divider */}
-              <hr className="my-4 border-gray-100 dark:border-slate-800/80" />
+              <hr className="my-4 border-gray-100" />
 
               {/* Interaction icons bar */}
-              <div className="flex justify-between px-2 text-gray-400 dark:text-slate-500">
+              <div className="flex justify-between px-2 text-gray-400">
                 <MessageCircle className="h-4.5 w-4.5 hover:text-blue-500 cursor-pointer transition-colors" />
                 <Repeat className="h-4.5 w-4.5 hover:text-green-500 cursor-pointer transition-colors" />
                 <Heart className="h-4.5 w-4.5 hover:text-pink-500 cursor-pointer transition-colors" />
@@ -468,7 +468,7 @@ export default function ScreenshotGenerator() {
             >
               <Download className="h-5 w-5" /> Download Screenshot Image (.png)
             </button>
-            <p className="text-[10px] text-center text-gray-400 dark:text-gray-500 mt-2 font-mono">
+            <p className="text-[10px] text-center text-gray-400 mt-2 font-mono">
               Rendered local browser-side via custom 2X Retina Canvas scaler.
             </p>
           </div>
@@ -480,3 +480,4 @@ export default function ScreenshotGenerator() {
     </div>
   );
 }
+
