@@ -16,6 +16,9 @@ export default function Downloader() {
   const [result, setResult] = useState<DownloadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(true);
+  const [videoError, setVideoError] = useState(false);
+  const [selectedPickerIndex, setSelectedPickerIndex] = useState(0);
 
   // Detect platform based on URL
   const getPlatform = (inputUrl: string): Platform => {
@@ -48,6 +51,9 @@ export default function Downloader() {
     setIsLoading(true);
     setError(null);
     setResult(null);
+    setVideoLoading(true);
+    setVideoError(false);
+    setSelectedPickerIndex(0);
 
     try {
       const response = await fetch("/api/download", {
@@ -263,161 +269,270 @@ export default function Downloader() {
         )}
 
         {result && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            className="max-w-3xl mx-auto space-y-6"
-            id="downloader-results-card"
-          >
-            {/* Main Result Body */}
-            <div className="bg-white border border-gray-100 rounded-3xl p-6 md:p-8 shadow-sm space-y-6 overflow-hidden">
-             <div className="flex flex-col lg:flex-row gap-6 items-start">
-                
-                {/* Media Preview Player (if single URL) */}
-                {(result.status === "redirect" || result.status === "stream") && result.url && (
-                 <div className="w-full lg:w-80 shrink-0 bg-gray-900 rounded-2xl overflow-hidden aspect-video md:aspect-[9/16] relative flex items-center justify-center border border-gray-800 shadow-inner group">
-                    {mode === "audio" ? (
-                      <div className="w-full p-6 text-center space-y-4">
-                        <div className="w-16 h-16 rounded-full bg-blue-500/20 text-blue-400 mx-auto flex items-center justify-center">
-                          <Play className="h-8 w-8 fill-current ml-1" />
-                        </div>
-                        <span className="text-xs font-semibold text-gray-300 block">Audio Preview (MP3)</span>
-                        <audio src={result.url} controls className="w-full" />
-                      </div>
-                    ) : (
-                      <>
-                        <video
-                          src={result.url}
-                          poster={result.thumb}
-                          controls
-                          playsInline
-                          preload="metadata"
-                          className="w-full h-full object-contain cursor-pointer"
-                        />
-                        <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white uppercase backdrop-blur-sm pointer-events-none">
-                          <Play className="h-3 w-3 text-blue-400 fill-current" /> Preview
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
+          (() => {
+            let activeMediaUrl = "";
+            let activePoster = "";
+            let activeItemType: "video" | "audio" | "photo" | "gif" = mode === "audio" ? "audio" : "video";
 
-                {/* Media Detail & Action Column */}
-                <div className="flex-1 min-w-0 space-y-6 w-full overflow-hidden">
-                  <div className="space-y-1">
-                    <div className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700">
-                      ✓ Extraction Successful
-                    </div>
-                    <h3 className="text-2xl font-semibold font-display tracking-tight text-gray-950 truncate">
-                      {result.title ? result.title : "Your Download is Ready!"}
-                    </h3>
-                    <p className="text-xs text-gray-400 font-mono break-all">
-                      Source: {url}
-                    </p>
-                  </div>
+            if ((result.status === "redirect" || result.status === "stream") && result.url) {
+              activeMediaUrl = result.url;
+              activePoster = result.thumb || "";
+            } else if (result.status === "picker" && result.picker && result.picker.length > 0) {
+              const item = result.picker[selectedPickerIndex] || result.picker[0];
+              activeMediaUrl = item.url;
+              activePoster = item.thumb || result.thumb || "";
+              activeItemType = item.type || "video";
+            }
 
-                  {/* If it's a redirect / single stream */}
-                  {(result.status === "redirect" || result.status === "stream") && result.url && (
-                    <div className="space-y-3" id="single-download-actions">
-                      <a
-                        href={`${result.url}&dl=1`}
-                        download={result.filename || "download.mp4"}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full max-w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 px-4 rounded-2xl shadow-md transition-all active:scale-98 cursor-pointer"
-                        id="primary-download-anchor"
-                      >
-                        <Download className="h-5 w-5" /> Download Media File
-                      </a>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
-                        <button
-                          type="button"
-                          onClick={() => handleCopyLink(`${window.location.origin}${result.url}&dl=1`)}
-                          className="flex items-center justify-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
-                        >
-                          {copiedLink ? (
-                            <>
-                              <Check className="h-4 w-4 text-green-500" /> Copied!
-                            </>
-                          ) : (
-                            <>
-                              <Clipboard className="h-4 w-4" /> Copy Direct Link
-                            </>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={clearForm}
-                          className="flex items-center justify-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
-                        >
-                          <RefreshCw className="h-4 w-4" /> Download Another
-                        </button>
-                      </div>
-                    </div>
-                  )}
+            const getYoutubeId = (inputUrl: string): string | null => {
+              if (!inputUrl) return null;
+              const match = inputUrl.match(/(?:v=|shorts\/|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
+              return match ? match[1] : null;
+            };
 
-                  {/* If it's a multiple media picker (Instagram Carousel / Multiple Photos) */}
-                  {result.status === "picker" && result.picker && (
-                    <div className="space-y-4 w-full" id="picker-download-grid">
-                      <span className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
-                        Choose elements to download ({result.picker.length} item(s) found):
-                      </span>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[350px] overflow-y-auto pr-1">
-                        {result.picker.map((item, index) => (
-                          <div
-                            key={index}
-                            className="flex items-center justify-between border border-gray-100 rounded-xl p-3 bg-gray-50/50 hover:bg-white transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              {item.thumb ? (
-                                <img
-                                  src={item.thumb}
-                                  alt="Media preview"
-                                  className="h-10 w-10 object-cover rounded-lg"
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                <div className="h-10 w-10 bg-gray-200 rounded-lg flex items-center justify-center text-gray-400">
-                                  {item.type === "video" ? <FileVideo className="h-5 w-5" /> : <FileImage className="h-5 w-5" />}
-                                </div>
-                              )}
-                              <div>
-                                <span className="block text-xs font-semibold text-gray-900 uppercase">
-                                  {item.type} {index + 1}
-                                </span>
-                                <span className="text-[10px] text-gray-400">Direct CDN Link</span>
-                              </div>
+            const youtubeId = getYoutubeId(url) || getYoutubeId(activeMediaUrl) || getYoutubeId(result.url || "");
+
+            return (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                className="max-w-3xl mx-auto space-y-6"
+                id="downloader-results-card"
+              >
+                {/* Main Result Body */}
+                <div className="bg-white border border-gray-100 rounded-3xl p-6 md:p-8 shadow-sm space-y-6 overflow-hidden">
+                  <div className="flex flex-col lg:flex-row gap-6 items-start">
+                    
+                    {/* Media Preview Player */}
+                    {activeMediaUrl && (
+                      <div className="w-full lg:w-80 shrink-0 bg-gray-900 rounded-2xl overflow-hidden min-h-[220px] max-h-[480px] relative flex items-center justify-center border border-gray-800 shadow-inner group" id="video-preview-container">
+                        {activeItemType === "audio" ? (
+                          <div className="w-full p-6 text-center space-y-4">
+                            <div className="w-16 h-16 rounded-full bg-blue-500/20 text-blue-400 mx-auto flex items-center justify-center">
+                              <Play className="h-8 w-8 fill-current ml-1" />
                             </div>
-                            <a
-                              href={`${item.url}&dl=1`}
-                              download={`media_${index + 1}.${item.type === "video" ? "mp4" : "jpg"}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white rounded-lg transition-colors cursor-pointer"
-                              title="Download Item"
-                            >
-                              <Download className="h-4 w-4" />
-                            </a>
+                            <span className="text-xs font-semibold text-gray-300 block">Audio Preview (MP3)</span>
+                            <audio
+                              src={activeMediaUrl}
+                              controls
+                              className="w-full"
+                              onLoadStart={() => { setVideoLoading(true); setVideoError(false); }}
+                              onCanPlay={() => setVideoLoading(false)}
+                              onError={() => { setVideoLoading(false); setVideoError(true); }}
+                            />
                           </div>
-                        ))}
+                        ) : activeItemType === "photo" ? (
+                          <img
+                            src={activeMediaUrl}
+                            alt="Preview"
+                            className="w-full h-full max-h-[480px] object-contain"
+                          />
+                        ) : youtubeId ? (
+                          <div className="w-full h-full min-h-[220px] max-h-[480px] aspect-video relative">
+                            <iframe
+                              src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=0&rel=0&modestbranding=1`}
+                              title={result.title || "YouTube Video Preview"}
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                              allowFullScreen
+                              className="w-full h-full border-0 rounded-2xl"
+                            />
+                            <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white uppercase backdrop-blur-sm pointer-events-none z-10">
+                              <Play className="h-3 w-3 text-blue-400 fill-current" /> Preview
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <video
+                              key={activeMediaUrl}
+                              src={activeMediaUrl}
+                              poster={activePoster || undefined}
+                              controls
+                              playsInline
+                              preload="metadata"
+                              onLoadStart={() => {
+                                setVideoLoading(true);
+                                setVideoError(false);
+                              }}
+                              onLoadedMetadata={() => {
+                                setVideoLoading(false);
+                              }}
+                              onCanPlay={() => {
+                                setVideoLoading(false);
+                              }}
+                              onError={() => {
+                                setVideoLoading(false);
+                                setVideoError(true);
+                              }}
+                              className="w-full h-full max-h-[480px] object-contain cursor-pointer"
+                            />
+
+                            {/* Loading Overlay */}
+                            {videoLoading && !videoError && (
+                              <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex flex-col items-center justify-center gap-2 text-white pointer-events-none transition-opacity">
+                                <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
+                                <span className="text-xs font-medium text-gray-200">Loading Preview...</span>
+                              </div>
+                            )}
+
+                            {/* Error Overlay */}
+                            {videoError && (
+                              <div className="absolute inset-0 bg-gray-900/95 p-4 flex flex-col items-center justify-center text-center space-y-3 z-20">
+                                <AlertCircle className="h-8 w-8 text-amber-400" />
+                                <div className="space-y-1">
+                                  <p className="text-xs font-semibold text-white">Preview Playback Notice</p>
+                                  <p className="text-[11px] text-gray-400 max-w-[220px] leading-tight">
+                                    Direct browser preview playback is constrained by source media encoding. You can still download the complete file below.
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setVideoError(false);
+                                    setVideoLoading(true);
+                                    const videoEl = document.querySelector('video');
+                                    if (videoEl) videoEl.load();
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors cursor-pointer"
+                                >
+                                  Retry Preview
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Preview Tag Badge */}
+                            {!videoLoading && !videoError && (
+                              <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white uppercase backdrop-blur-sm pointer-events-none z-10">
+                                <Play className="h-3 w-3 text-blue-400 fill-current" /> Preview
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={clearForm}
-                        className="w-full flex items-center justify-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
-                      >
-                        <RefreshCw className="h-4 w-4" /> Download Another Link
-                      </button>
+                    )}
+
+                    {/* Media Detail & Action Column */}
+                    <div className="flex-1 min-w-0 space-y-6 w-full overflow-hidden">
+                      <div className="space-y-1">
+                        <div className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700">
+                          ✓ Extraction Successful
+                        </div>
+                        <h3 className="text-2xl font-semibold font-display tracking-tight text-gray-950 truncate">
+                          {result.title ? result.title : "Your Download is Ready!"}
+                        </h3>
+                        <p className="text-xs text-gray-400 font-mono break-all">
+                          Source: {url}
+                        </p>
+                      </div>
+
+                      {/* If it's a redirect / single stream */}
+                      {(result.status === "redirect" || result.status === "stream") && result.url && (
+                        <div className="space-y-3" id="single-download-actions">
+                          <a
+                            href={`${result.url}&dl=1`}
+                            download={result.filename || "download.mp4"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full max-w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 px-4 rounded-2xl shadow-md transition-all active:scale-98 cursor-pointer"
+                            id="primary-download-anchor"
+                          >
+                            <Download className="h-5 w-5" /> Download Media File
+                          </a>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyLink(`${window.location.origin}${result.url}&dl=1`)}
+                              className="flex items-center justify-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
+                            >
+                              {copiedLink ? (
+                                <>
+                                  <Check className="h-4 w-4 text-green-500" /> Copied!
+                                </>
+                              ) : (
+                                <>
+                                  <Clipboard className="h-4 w-4" /> Copy Direct Link
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={clearForm}
+                              className="flex items-center justify-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
+                            >
+                              <RefreshCw className="h-4 w-4" /> Download Another
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* If it's a multiple media picker (Instagram Carousel / Multiple Photos) */}
+                      {result.status === "picker" && result.picker && (
+                        <div className="space-y-4 w-full" id="picker-download-grid">
+                          <span className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                            Choose elements to preview & download ({result.picker.length} item(s) found):
+                          </span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[350px] overflow-y-auto pr-1">
+                            {result.picker.map((item, index) => (
+                              <div
+                                key={index}
+                                onClick={() => setSelectedPickerIndex(index)}
+                                className={`flex items-center justify-between border rounded-xl p-3 cursor-pointer transition-colors ${
+                                  selectedPickerIndex === index
+                                    ? "border-blue-500 bg-blue-50/50 shadow-sm"
+                                    : "border-gray-100 bg-gray-50/50 hover:bg-white"
+                                }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  {item.thumb ? (
+                                    <img
+                                      src={item.thumb}
+                                      alt="Media preview"
+                                      className="h-10 w-10 object-cover rounded-lg"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <div className="h-10 w-10 bg-gray-200 rounded-lg flex items-center justify-center text-gray-400">
+                                      {item.type === "video" ? <FileVideo className="h-5 w-5" /> : <FileImage className="h-5 w-5" />}
+                                    </div>
+                                  )}
+                                  <div>
+                                    <span className="block text-xs font-semibold text-gray-900 uppercase">
+                                      {item.type} {index + 1}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400">Click to preview</span>
+                                  </div>
+                                </div>
+                                <a
+                                  href={`${item.url}&dl=1`}
+                                  download={`media_${index + 1}.${item.type === "video" ? "mp4" : "jpg"}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white rounded-lg transition-colors cursor-pointer"
+                                  title="Download Item"
+                                >
+                                  <Download className="h-4 w-4" />
+                                </a>
+                              </div>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={clearForm}
+                            className="w-full flex items-center justify-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
+                          >
+                            <RefreshCw className="h-4 w-4" /> Download Another Link
+                          </button>
+                        </div>
+                      )}
+
                     </div>
-                  )}
-
+                  </div>
                 </div>
-              </div>
-            </div>
-
-          </motion.div>
+              </motion.div>
+            );
+          })()
         )}
       </AnimatePresence>
 

@@ -7,8 +7,29 @@ import dotenv from "dotenv";
 // Load environment variables
 dotenv.config();
 
-// Bypass strict SSL verification for restrictive networks (fixes UNABLE_TO_VERIFY_LEAF_SIGNATURE)
-// process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+// Prevent unhandled stream/socket terminations from crashing the server
+process.on("uncaughtException", (err) => {
+  console.warn("Uncaught Exception caught:", err.stack || err);
+});
+process.on("unhandledRejection", (reason: any) => {
+  console.warn("Unhandled Rejection caught:", reason?.stack || reason);
+});
+process.on("exit", (code) => {
+  console.log("Server process exiting with code:", code);
+});
+process.on("SIGINT", () => {
+  console.log("Received SIGINT");
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  console.log("Received SIGTERM");
+  process.exit(0);
+});
+
+// Keep event loop active
+if (process.stdin && process.stdin.resume) {
+  process.stdin.resume();
+}
 
 import { spawn, exec } from "child_process";
 import fs from "fs";
@@ -125,28 +146,28 @@ async function initYtDlp() {
   }
 }
 
-// Cache for Cobalt working instances
+// Cache for Cobalt working instances per platform
 interface CobaltInstancesCache {
-  instances: string[];
+  instances: Record<string, string[]>;
   lastFetched: number;
 }
 
 let cobaltCache: CobaltInstancesCache = {
-  instances: [],
+  instances: {},
   lastFetched: 0
 };
 
-const COBALT_CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+const COBALT_CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
 // Fetch working instances from cobalt.directory
 async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "youtube" | "tiktok" = "youtube"): Promise<string[]> {
   const now = Date.now();
-  if (cobaltCache.instances.length > 0 && (now - cobaltCache.lastFetched < COBALT_CACHE_DURATION)) {
-    console.log("Using cached Cobalt instances list...");
-    return cobaltCache.instances;
+  if (cobaltCache.instances[platform] && cobaltCache.instances[platform].length > 0 && (now - cobaltCache.lastFetched < COBALT_CACHE_DURATION)) {
+    console.log(`Using cached Cobalt instances list for platform: ${platform}...`);
+    return cobaltCache.instances[platform];
   }
 
-  console.log("Fetching fresh working instances list from cobalt.directory...");
+  console.log(`Fetching fresh working instances list for ${platform} from cobalt.directory...`);
   try {
     const list = await new Promise<string[]>((resolve, reject) => {
       const req = https.get("https://cobalt.directory/api/working?type=api", {
@@ -162,14 +183,12 @@ async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "yo
             const parsed = JSON.parse(body);
             if (parsed && parsed.data) {
               const d = parsed.data;
-              // Priority: platform-specific first, then cross platforms, then general API pool
               let platformList: string[] = d[platform] || [];
               if (platform === "youtube" && d["youtube-shorts"]) {
                 platformList = Array.from(new Set([...platformList, ...d["youtube-shorts"]]));
               }
               const crossList: string[] = Array.from(new Set([...(d.youtube || []), ...(d.tiktok || []), ...(d.instagram || []), ...(d.twitter || [])]));
               
-              // Combine all non-Frontend keys for general pool
               const generalPool: string[] = Object.entries(d)
                 .filter(([key]) => key !== "Frontend")
                 .flatMap(([, val]) => val as string[]);
@@ -202,7 +221,6 @@ async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "yo
               const cleaned = merged
                 .map((u: string) => {
                   let clean = u.trim();
-                  // Strip legacy /api/json suffix
                   if (clean.endsWith("/api/json")) clean = clean.slice(0, -9);
                   else if (clean.endsWith("/api/json/")) clean = clean.slice(0, -10);
                   if (clean.endsWith("/")) clean = clean.slice(0, -1);
@@ -210,7 +228,7 @@ async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "yo
                 })
                 .filter((u) => Boolean(u) && !jwtRequired.has(u));
 
-              console.log(`cobalt.directory: ${platformList.length} ${platform}-capable, ${cleaned.length} usable instances (JWT instances filtered)`);
+              console.log(`cobalt.directory: ${platformList.length} ${platform}-capable, ${cleaned.length} usable instances`);
               resolve(cleaned);
             } else {
               reject(new Error("Invalid response format from cobalt.directory"));
@@ -229,8 +247,9 @@ async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "yo
     });
 
     if (list && list.length > 0) {
-      cobaltCache = { instances: list, lastFetched: now };
-      console.log(`Successfully fetched and cached ${list.length} Cobalt instances.`);
+      cobaltCache.instances[platform] = list;
+      cobaltCache.lastFetched = now;
+      console.log(`Successfully fetched and cached ${list.length} Cobalt instances for ${platform}.`);
       return list;
     }
   } catch (error: any) {
@@ -536,10 +555,16 @@ async function startServer() {
 
         if (winner.data.url) {
           const safeFilename = `${(winner.data.filename || "video").replace(/[^a-zA-Z0-9_.-]/g, "_")}.${downloadMode === "audio" ? "mp3" : "mp4"}`;
+          let thumb = winner.data.thumb || winner.data.cover || "";
+          if (!thumb && isYoutube) {
+            const ytMatch = url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+            if (ytMatch) thumb = `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`;
+          }
           return res.json({
             status: "stream",
             url: `/api/stream?url=${encodeURIComponent(winner.data.url)}&filename=${encodeURIComponent(safeFilename)}`,
             title: winner.data.filename || "video",
+            thumb,
             filename: safeFilename,
           });
         }
@@ -550,9 +575,15 @@ async function startServer() {
             return {
               ...item,
               url: `/api/stream?url=${encodeURIComponent(item.url)}&filename=${encodeURIComponent(safeFilename)}`,
+              thumb: item.thumb || item.cover || winner.data.thumb || winner.data.cover || "",
             };
           });
-          return res.json({ status: "picker", picker: mappedPicker });
+          return res.json({
+            status: "picker",
+            picker: mappedPicker,
+            title: winner.data.filename || "video",
+            thumb: winner.data.thumb || winner.data.cover || "",
+          });
         }
       } catch (_) {
         console.log("Parallel Cobalt race yielded no immediate hit, proceeding to fast yt-dlp extraction...");
@@ -571,7 +602,7 @@ async function startServer() {
                 const entryExt = entry.ext || "mp4";
                 const safeFilename = `${cleanTitle}_part${index + 1}.${entryExt}`;
                 const entryDirectUrl = entry.url || entry.requested_downloads?.[0]?.url;
-                const streamUrl = entryDirectUrl && !entryDirectUrl.includes(".m3u8")
+                const streamUrl = entryDirectUrl && !entryDirectUrl.includes(".m3u8") && !entryDirectUrl.includes(".mpd")
                   ? `/api/stream?url=${encodeURIComponent(entryDirectUrl)}&filename=${encodeURIComponent(safeFilename)}`
                   : `/api/media?src=${encodeURIComponent(entry.webpage_url || url)}&quality=${videoQuality || "1080"}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
                 return {
@@ -585,20 +616,20 @@ async function startServer() {
 
             const safeFilename = `${cleanTitle}.${downloadMode === "audio" ? "mp3" : "mp4"}`;
 
-            // Extract direct unthrottled CDN URL (twimg.com, cdninstagram.com, akamaized.net, etc.)
+            // Prefer pre-muxed combined formats (with both video + audio) for direct browser playback
             const directCdnUrl =
+              info.formats?.filter((f: any) => f.vcodec !== "none" && f.acodec !== "none" && f.url && f.ext === "mp4" && !f.url.includes(".m3u8") && !f.url.includes(".mpd"))?.pop()?.url ||
               info.url ||
               info.requested_downloads?.[0]?.url ||
-              info.formats?.filter((f: any) => f.vcodec !== "none" && f.url && f.ext === "mp4" && !f.url.includes(".m3u8"))?.pop()?.url ||
-              info.formats?.filter((f: any) => f.url && !f.url.includes(".m3u8"))?.pop()?.url;
+              info.formats?.filter((f: any) => f.vcodec !== "none" && f.url && !f.url.includes(".m3u8") && !f.url.includes(".mpd"))?.pop()?.url;
 
-            if (directCdnUrl && !directCdnUrl.includes(".m3u8")) {
+            if (directCdnUrl && !directCdnUrl.includes(".m3u8") && !directCdnUrl.includes(".mpd")) {
               console.log(`Direct CDN URL extracted (${directCdnUrl.substring(0, 60)}...) — routing to instant proxy stream!`);
               return res.json({
                 status: "stream",
                 url: `/api/stream?url=${encodeURIComponent(directCdnUrl)}&filename=${encodeURIComponent(safeFilename)}`,
                 title: info.title || "video",
-                thumb: info.thumbnail || info.thumbnails?.[0]?.url || "",
+                thumb: info.thumbnail || info.thumbnails?.[0]?.url || (isYoutube ? `https://i.ytimg.com/vi/${url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1] || ""}/hqdefault.jpg` : ""),
                 filename: safeFilename,
               });
             }
@@ -609,7 +640,7 @@ async function startServer() {
               status: "stream",
               url: `/api/media?src=${encodeURIComponent(url)}&quality=${videoQuality || "1080"}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`,
               title: info.title || "video",
-              thumb: info.thumbnail || info.thumbnails?.[0]?.url || "",
+              thumb: info.thumbnail || info.thumbnails?.[0]?.url || (isYoutube ? `https://i.ytimg.com/vi/${url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1] || ""}/hqdefault.jpg` : ""),
               filename: safeFilename,
             });
           }
@@ -629,8 +660,7 @@ async function startServer() {
 
   // Direct yt-dlp Media Streaming Endpoint
   // Spawns yt-dlp with -o - to pipe audio/video directly to the browser.
-  // This is the primary streaming method for YouTube, TikTok, Instagram, Twitter.
-  // Advantages over CDN proxy: handles auth/cookies, no URL expiry, correct format/quality selection.
+  // Prioritises single pre-muxed streams (no ffmpeg needed).
   app.get("/api/media", (req, res) => {
     const { src, quality, mode, filename, dl } = req.query;
 
@@ -647,11 +677,10 @@ async function startServer() {
     const targetHeight = parseInt(quality as string) || 1080;
     const safeFilename = (filename as string) || (isAudio ? "audio.mp3" : "video.mp4");
 
-    // Build format selector string — prioritise pre-muxed MP4 (no ffmpeg needed)
-    // Falls back to best available if target quality not found
+    // Build format selector string — prioritise pre-muxed single stream (no ffmpeg required)
     const formatStr = isAudio
-      ? "bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio"
-      : `best[height<=${targetHeight}][ext=mp4]/best[ext=mp4]/bestvideo[height<=${targetHeight}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best`;
+      ? "bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio/ba"
+      : `best[height<=${targetHeight}][ext=mp4]/best[ext=mp4]/b[ext=mp4]/best/b`;
 
     const isYoutube = /youtube\.com|youtu\.be/.test(src);
     const isTiktok = /tiktok\.com/.test(src);
@@ -755,14 +784,15 @@ async function startServer() {
 
     console.log(`Piping media stream (${isDownload ? "DOWNLOAD" : "PREVIEW"}): ${url.substring(0, 60)}...`);
 
-    const referer =
-      url.includes("instagram")
-        ? "https://www.instagram.com/"
-        : url.includes("twitter") || url.includes("x.com")
-        ? "https://twitter.com/"
-        : url.includes("tiktok")
-        ? "https://www.tiktok.com/"
-        : "https://www.youtube.com/";
+    const lowerUrl = url.toLowerCase();
+    let referer = "https://www.youtube.com/";
+    if (lowerUrl.includes("twimg") || lowerUrl.includes("twitter") || lowerUrl.includes("x.com") || lowerUrl.includes("t.co")) {
+      referer = "https://twitter.com/";
+    } else if (lowerUrl.includes("instagram") || lowerUrl.includes("cdninstagram") || lowerUrl.includes("fbcdn")) {
+      referer = "https://www.instagram.com/";
+    } else if (lowerUrl.includes("tiktok") || lowerUrl.includes("tiktokv") || lowerUrl.includes("byteoversea") || lowerUrl.includes("muscdn") || lowerUrl.includes("ibyteimg")) {
+      referer = "https://www.tiktok.com/";
+    }
 
     const clientHeaders: Record<string, string> = {
       "User-Agent":
@@ -793,8 +823,22 @@ async function startServer() {
           return;
         }
 
+        let rawContentType = response.headers["content-type"];
+        let contentType = "video/mp4";
+        if (rawContentType && !rawContentType.includes("octet-stream") && !rawContentType.includes("text/plain")) {
+          contentType = rawContentType;
+        } else if (safeFilename.endsWith(".mp3")) {
+          contentType = "audio/mpeg";
+        } else if (safeFilename.endsWith(".webm")) {
+          contentType = "video/webm";
+        } else if (safeFilename.endsWith(".jpg") || safeFilename.endsWith(".jpeg")) {
+          contentType = "image/jpeg";
+        } else if (safeFilename.endsWith(".png")) {
+          contentType = "image/png";
+        }
+
         const headers: Record<string, string> = {
-          "Content-Type": response.headers["content-type"] || "video/mp4",
+          "Content-Type": contentType,
           "Accept-Ranges": response.headers["accept-ranges"] || "bytes",
           "Cache-Control": "public, max-age=3600",
           "Access-Control-Allow-Origin": "*",
@@ -802,7 +846,8 @@ async function startServer() {
           "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
         };
         // Only include Content-Length and Content-Range if they are present and non-empty
-        if (response.headers["content-length"]) headers["Content-Length"] = response.headers["content-length"];
+        const contentLength = response.headers["content-length"] || response.headers["estimated-content-length"];
+        if (contentLength) headers["Content-Length"] = contentLength as string;
         if (response.headers["content-range"]) headers["Content-Range"] = response.headers["content-range"];
 
         if (isDownload) {
@@ -812,11 +857,22 @@ async function startServer() {
         }
 
         res.writeHead(response.statusCode || 200, headers);
+        
+        response.on("error", (err) => {
+          console.warn("Incoming stream chunk error:", err.message);
+          res.end();
+        });
+
+        res.on("error", (err) => {
+          console.warn("Outgoing client stream error:", err.message);
+          request.destroy();
+        });
+
         response.pipe(res);
       });
 
       request.on("error", (err) => {
-        console.error("Proxy streaming request failure:", err);
+        console.error("Proxy streaming request failure:", err.message);
         if (!res.headersSent) {
           res.status(500).send("Media streaming failed");
         }
