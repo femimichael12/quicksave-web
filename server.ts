@@ -7,6 +7,9 @@ import dotenv from "dotenv";
 // Load environment variables
 dotenv.config();
 
+// Bypass self-signed/proxy TLS leaf certificate rejection
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 // Prevent unhandled stream/socket terminations from crashing the server
 process.on("uncaughtException", (err) => {
   console.warn("Uncaught Exception caught:", err.stack || err);
@@ -288,6 +291,111 @@ function getInstagramCookieFile(): string | null {
   }
 }
 
+// Write a Netscape cookie file for Twitter/X if auth token is available
+function getTwitterCookieFile(): string | null {
+  const authToken = process.env.TWITTER_AUTH_TOKEN || process.env.TWITTER_SESSION_COOKIE || process.env.X_AUTH_TOKEN;
+  const ct0 = process.env.TWITTER_CT0 || process.env.X_CT0 || "";
+  if (!authToken) return null;
+
+  try {
+    const cookieFilePath = path.join(os.tmpdir(), "twitter_cookies.txt");
+    const cookieContent = [
+      "# Netscape HTTP Cookie File",
+      "# This is generated automatically by QuickSave",
+      "",
+      `.twitter.com\tTRUE\t/\tTRUE\t2147483647\tauth_token\t${authToken}`,
+      `.x.com\tTRUE\t/\tTRUE\t2147483647\tauth_token\t${authToken}`,
+      ct0 ? `.twitter.com\tTRUE\t/\tTRUE\t2147483647\tct0\t${ct0}` : "",
+      ct0 ? `.x.com\tTRUE\t/\tTRUE\t2147483647\tct0\t${ct0}` : "",
+    ].filter(Boolean).join("\n");
+    fs.writeFileSync(cookieFilePath, cookieContent, "utf8");
+    return cookieFilePath;
+  } catch (e: any) {
+    console.warn("Failed to write Twitter cookie file:", e.message);
+    return null;
+  }
+}
+
+function isSafeUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "0.0.0.0" ||
+      hostname.endsWith(".localhost") ||
+      hostname.endsWith(".local") ||
+      hostname.startsWith("10.") ||
+      hostname.startsWith("192.168.") ||
+      hostname.startsWith("169.254.") ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname) ||
+      hostname === "metadata.google.internal" ||
+      hostname === "instance-data"
+    ) {
+      return false;
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Quick probe to check if a remote media URL is actually reachable and returns 200/206/30x
+function checkUpstreamAlive(targetUrl: string, timeoutMs = 1500): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      if (!isSafeUrl(targetUrl)) return resolve(false);
+      const parsed = new URL(targetUrl);
+      const protocol = parsed.protocol === "https:" ? https : http;
+      const req = protocol.request(
+        parsed,
+        {
+          method: "HEAD",
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+          rejectUnauthorized: false,
+          timeout: timeoutMs,
+        },
+        (res) => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 400) {
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        }
+      );
+      req.on("error", () => resolve(false));
+      req.on("timeout", () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.end();
+    } catch (_) {
+      resolve(false);
+    }
+  });
+}
+
+function detectPlatform(url: string): "twitter" | "instagram" | "youtube" | "tiktok" | "facebook" | "reddit" | "pinterest" | "threads" | "twitch" | "vimeo" | "other" {
+  const lower = url.toLowerCase();
+  if (/twitter\.com|x\.com|t\.co/.test(lower)) return "twitter";
+  if (/instagram\.com/.test(lower)) return "instagram";
+  if (/youtube\.com|youtu\.be/.test(lower)) return "youtube";
+  if (/tiktok\.com|tiktokv\.com|douyin\.com/.test(lower)) return "tiktok";
+  if (/facebook\.com|fb\.watch|fb\.com/.test(lower)) return "facebook";
+  if (/reddit\.com|redd\.it/.test(lower)) return "reddit";
+  if (/pinterest\.com|pin\.it/.test(lower)) return "pinterest";
+  if (/threads\.net/.test(lower)) return "threads";
+  if (/twitch\.tv/.test(lower)) return "twitch";
+  if (/vimeo\.com/.test(lower)) return "vimeo";
+  return "other";
+}
+
 function normalizeMediaUrl(inputUrl: string): string {
   try {
     let clean = inputUrl.trim();
@@ -300,9 +408,9 @@ function normalizeMediaUrl(inputUrl: string): string {
     if (ytLongMatch) {
       return `https://www.youtube.com/watch?v=${ytLongMatch[1]}`;
     }
-    const twitterMatch = clean.match(/(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)\/status\/(\d+)/);
+    const twitterMatch = clean.match(/(?:twitter\.com|x\.com)\/(?:#!\/)?(?:i\/web\/|i\/)?(?:[a-zA-Z0-9_]+)\/status\/(\d+)/);
     if (twitterMatch) {
-      return `https://x.com/${twitterMatch[1]}/status/${twitterMatch[2]}`;
+      return `https://x.com/i/status/${twitterMatch[1]}`;
     }
     const instaMatch = clean.match(/(?:instagram\.com)\/(p|reel|tv)\/([a-zA-Z0-9_-]+)/);
     if (instaMatch) {
@@ -313,6 +421,109 @@ function normalizeMediaUrl(inputUrl: string): string {
     return inputUrl.trim();
   }
 }
+
+// Specialized high-speed TikTok extractor (watermark-free HD MP4, MP3 audio, and photo carousels)
+async function extractTikTokMedia(
+  rawUrl: string,
+  downloadMode = "auto",
+  videoQuality = "1080"
+): Promise<{
+  status: "stream" | "picker";
+  url?: string;
+  previewUrl?: string;
+  fallbackUrl?: string;
+  title: string;
+  thumb: string;
+  filename?: string;
+  picker?: Array<{
+    url: string;
+    previewUrl: string;
+    fallbackUrl: string;
+    type: "video" | "audio" | "photo";
+    thumb: string;
+  }>;
+}> {
+  const cleanUrl = rawUrl.trim();
+  const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(cleanUrl)}&hd=1`, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Accept": "application/json"
+    }
+  });
+  const data = await res.json();
+  if (data.code !== 0 || !data.data) {
+    throw new Error(data.msg || "Failed to extract TikTok media via TikWM");
+  }
+
+  const item = data.data;
+  const rawTitle = item.title || item.desc || "tiktok_video";
+  const cleanTitle = rawTitle.replace(/[^a-zA-Z0-9_.-]/g, "_").substring(0, 60) || "tiktok_video";
+  const isAudio = downloadMode === "audio";
+
+  // Check if it's a photo gallery / carousel post
+  if (Array.isArray(item.images) && item.images.length > 0) {
+    const picker = item.images.map((imgUrl: string, idx: number) => {
+      const safeFilename = `${cleanTitle}_photo_${idx + 1}.jpg`;
+      const streamUrl = `/api/stream?url=${encodeURIComponent(imgUrl)}&filename=${encodeURIComponent(safeFilename)}&src=${encodeURIComponent(cleanUrl)}`;
+      return {
+        url: streamUrl,
+        previewUrl: streamUrl,
+        fallbackUrl: streamUrl,
+        type: "photo" as const,
+        thumb: imgUrl
+      };
+    });
+
+    if (item.music) {
+      const safeAudioFilename = `${cleanTitle}_audio.mp3`;
+      const musicStreamUrl = `/api/stream?url=${encodeURIComponent(item.music)}&filename=${encodeURIComponent(safeAudioFilename)}&src=${encodeURIComponent(cleanUrl)}`;
+      picker.unshift({
+        url: musicStreamUrl,
+        previewUrl: musicStreamUrl,
+        fallbackUrl: musicStreamUrl,
+        type: "audio" as const,
+        thumb: item.cover || ""
+      });
+    }
+
+    return {
+      status: "picker",
+      picker,
+      title: rawTitle,
+      thumb: item.cover || ""
+    };
+  }
+
+  const mediaUrl = isAudio
+    ? (item.music || item.play)
+    : (item.hdplay || item.play || item.wmplay);
+
+  if (!mediaUrl) {
+    throw new Error("No downloadable media URL found in TikTok response.");
+  }
+
+  const safeFilename = `${cleanTitle}.${isAudio ? "mp3" : "mp4"}`;
+  const streamUrl = `/api/stream?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(safeFilename)}&src=${encodeURIComponent(cleanUrl)}`;
+  const fallbackUrl = `/api/media?src=${encodeURIComponent(cleanUrl)}&quality=720&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
+
+  return {
+    status: "stream",
+    url: streamUrl,
+    previewUrl: streamUrl,
+    fallbackUrl,
+    title: rawTitle,
+    thumb: item.cover || "",
+    filename: safeFilename
+  };
+}
+
+interface StreamContext {
+  headers?: Record<string, string>;
+  cookies?: string;
+  timestamp: number;
+}
+
+const streamContextCache = new Map<string, StreamContext>();
 
 // Query media info with yt-dlp
 function getMediaInfo(rawUrl: string): Promise<any> {
@@ -326,10 +537,16 @@ function getMediaInfo(rawUrl: string): Promise<any> {
     const args: string[] = ["-4"];
 
     // Use session cookie file if available (from env variable)
-    const cookieFile = getInstagramCookieFile();
-    if (cookieFile) {
-      args.push("--cookies", cookieFile);
+    const igCookieFile = getInstagramCookieFile();
+    if (igCookieFile && /instagram\.com/.test(url)) {
+      args.push("--cookies", igCookieFile);
       console.log("Using Instagram session cookie from INSTAGRAM_SESSION_COOKIE env variable");
+    }
+
+    const twitterCookieFile = getTwitterCookieFile();
+    if (twitterCookieFile && (/twitter\.com|x\.com/.test(url))) {
+      args.push("--cookies", twitterCookieFile);
+      console.log("Using Twitter session cookie from TWITTER_AUTH_TOKEN env variable");
     }
 
     const isYoutube = /youtube\.com|youtu\.be/.test(url);
@@ -388,6 +605,127 @@ function getMediaInfo(rawUrl: string): Promise<any> {
   });
 }
 
+// Reusable media pipe using yt-dlp (with H.264/AAC browser-compatible streaming)
+function pipeYtDlpMedia(
+  src: string,
+  req: express.Request,
+  res: express.Response,
+  options: {
+    isDownload?: boolean;
+    isAudio?: boolean;
+    targetHeight?: number;
+    safeFilename?: string;
+  }
+) {
+  if (!isYtDlpAvailable) {
+    if (!res.headersSent) {
+      res.status(503).send("yt-dlp not available for direct media streaming");
+    }
+    return;
+  }
+
+  const isDownload = options.isDownload || false;
+  const isAudio = options.isAudio || false;
+  const targetHeight = options.targetHeight || 720;
+  const safeFilename = options.safeFilename || (isAudio ? "audio.mp3" : "video.mp4");
+
+  // Single pre-muxed format selector prioritizing universal H.264/AVC1 for video & AAC/MP3 for audio
+  const formatStr = isAudio
+    ? "bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio/ba"
+    : `best[vcodec^=avc1][height<=${targetHeight}][ext=mp4]/best[vcodec^=h264][height<=${targetHeight}][ext=mp4]/best[height<=${targetHeight}][ext=mp4]/best[vcodec^=avc1][ext=mp4]/best[vcodec^=h264][ext=mp4]/best[ext=mp4]/best/b`;
+
+  const isYoutube = /youtube\.com|youtu\.be/.test(src);
+  const isTiktok = /tiktok\.com/.test(src);
+
+  const args: string[] = [
+    "-4",
+    "--no-playlist",
+    "--no-check-certificate",
+    "--no-warnings",
+    "--ignore-errors",
+    "-f", formatStr,
+    "-o", "-",
+  ];
+
+  if (isYoutube) {
+    args.push("--extractor-args", "youtube:player_client=web,android");
+  }
+
+  if (isTiktok) {
+    args.push("--extractor-args", "tiktok:api_hostname=api16-normal-c-useast1a.tiktokv.com");
+  }
+
+  const igCookieFile = getInstagramCookieFile();
+  if (igCookieFile && src.includes("instagram")) {
+    args.push("--cookies", igCookieFile);
+  }
+
+  const twitterCookieFile = getTwitterCookieFile();
+  if (twitterCookieFile && (/twitter\.com|x\.com/.test(src))) {
+    args.push("--cookies", twitterCookieFile);
+  }
+
+  args.push(src);
+
+  console.log(`[Preview] yt-dlp media streaming pipe (${isAudio ? "audio" : `video@${targetHeight}p`}) for: ${src.substring(0, 60)}...`);
+  const proc = spawn(ytDlpPath, args, { windowsHide: true });
+
+  let dataStarted = false;
+
+  proc.stdout.on("data", (chunk: Buffer) => {
+    if (!dataStarted) {
+      dataStarted = true;
+      const contentType = isAudio ? "audio/mpeg" : "video/mp4";
+      const disposition = isDownload
+        ? `attachment; filename="${safeFilename}"`
+        : `inline; filename="${safeFilename}"`;
+      res.writeHead(200, {
+        "Content-Type": contentType,
+        "Content-Disposition": disposition,
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-store",
+        "Transfer-Encoding": "chunked",
+        "X-Content-Type-Options": "nosniff",
+      });
+    }
+    res.write(chunk);
+  });
+
+  proc.stdout.on("end", () => {
+    if (!dataStarted && !res.headersSent) {
+      res.status(502).send("yt-dlp produced no media output. The URL may be unavailable or geo-blocked.");
+    } else {
+      res.end();
+    }
+  });
+
+  proc.stderr.on("data", (data: Buffer) => {
+    const msg = data.toString();
+    if (!msg.startsWith("[download]") && !msg.startsWith("[info]") && !msg.startsWith("[youtube]")) {
+      console.warn("[Preview] yt-dlp stderr:", msg.substring(0, 250));
+    }
+  });
+
+  proc.on("error", (err: Error) => {
+    console.error("[Preview] yt-dlp spawn error:", err);
+    if (!res.headersSent) {
+      res.status(500).send("Failed to start yt-dlp media process");
+    }
+  });
+
+  proc.on("close", (code: number | null) => {
+    console.log(`[Preview] yt-dlp stream pipe exited with code ${code}`);
+    if (!res.writableEnded) res.end();
+  });
+
+  res.on("close", () => {
+    if (!proc.killed) {
+      proc.kill("SIGTERM");
+    }
+  });
+}
+
 // NOTE: initYtDlp() is now awaited inside startServer() before the server listens.
 
 async function startServer() {
@@ -424,27 +762,27 @@ async function startServer() {
         return res.status(400).json({ error: "Missing required field: url" });
       }
 
-      const url = normalizeMediaUrl(rawUrl);
-
-      // Basic validation for URL
-      const isTwitter = /twitter\.com|x\.com/.test(url);
-      const isInstagram = /instagram\.com/.test(url);
-      const isYoutube = /youtube\.com|youtu\.be/.test(url);
-      const isTiktok = /tiktok\.com/.test(url);
-
-      if (!isTwitter && !isInstagram && !isYoutube && !isTiktok) {
-        return res.status(400).json({
-          error: "Invalid URL. Twitter (X), Instagram, YouTube, and TikTok URLs are supported.",
-        });
+      if (!isSafeUrl(rawUrl)) {
+        return res.status(400).json({ error: "Invalid URL provided. Only public http/https links are supported." });
       }
 
-      let detectedPlatform: "instagram" | "twitter" | "youtube" | "tiktok" = "youtube";
-      if (isTwitter) detectedPlatform = "twitter";
-      else if (isInstagram) detectedPlatform = "instagram";
-      else if (isTiktok) detectedPlatform = "tiktok";
-      else if (isYoutube) detectedPlatform = "youtube";
+      const url = normalizeMediaUrl(rawUrl);
+      const platform = detectPlatform(url);
+      const isYoutube = platform === "youtube";
 
-      console.log(`Processing fast download request for (${detectedPlatform}): ${url} (Mode: ${downloadMode || "auto"}, Quality: ${videoQuality || "1080"})`);
+      console.log(`Processing media request for (${platform}): ${url} (Mode: ${downloadMode || "auto"}, Quality: ${videoQuality || "1080"})`);
+
+      // ── Specialized Strategy 0: Direct High-Speed TikTok Media Extraction ─────────
+      if (platform === "tiktok") {
+        try {
+          console.log(`Extracting TikTok media via fast engine for: ${url}...`);
+          const tiktokResult = await extractTikTokMedia(rawUrl, downloadMode, videoQuality);
+          console.log(`TikTok extraction successful: ${tiktokResult.title?.substring(0, 40)}`);
+          return res.json(tiktokResult);
+        } catch (ttErr: any) {
+          console.warn("Direct TikTok extraction failed, falling back to Cobalt/yt-dlp:", ttErr.message);
+        }
+      }
 
       // ── Helper: POST to single Cobalt instance with fast timeout ──────────────
       const postToCobalt = (
@@ -522,7 +860,8 @@ async function startServer() {
       };
 
       // ── Strategy 1: High-Speed Parallel Cobalt Racing (sub-second target) ─────
-      const endpoints = await getWorkingCobaltInstances(detectedPlatform);
+      const cobaltPlatform = (platform === "twitter" || platform === "instagram" || platform === "tiktok") ? platform : "youtube";
+      const endpoints = await getWorkingCobaltInstances(cobaltPlatform);
       const topEndpoints = endpoints.slice(0, 8);
 
       const modernPayload: any = { url };
@@ -533,7 +872,7 @@ async function startServer() {
         modernPayload.videoQuality = videoQuality || "1080";
       }
 
-      console.log(`Racing ${topEndpoints.length} fast Cobalt endpoints in parallel...`);
+      console.log(`Racing ${topEndpoints.length} fast Cobalt endpoints in parallel for ${platform}...`);
 
       const racePromises = topEndpoints.map(async (endpoint) => {
         // Try simple payload first for maximum Cobalt compatibility
@@ -554,27 +893,43 @@ async function startServer() {
         console.log(`Sub-second Cobalt win from: ${winner.endpoint}`);
 
         if (winner.data.url) {
-          const safeFilename = `${(winner.data.filename || "video").replace(/[^a-zA-Z0-9_.-]/g, "_")}.${downloadMode === "audio" ? "mp3" : "mp4"}`;
-          let thumb = winner.data.thumb || winner.data.cover || "";
-          if (!thumb && isYoutube) {
-            const ytMatch = url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-            if (ytMatch) thumb = `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`;
+          // Verify winner URL is alive before returning
+          const isAlive = await checkUpstreamAlive(winner.data.url, 1200);
+          if (isAlive) {
+            const safeFilename = `${(winner.data.filename || "video").replace(/[^a-zA-Z0-9_.-]/g, "_")}.${downloadMode === "audio" ? "mp3" : "mp4"}`;
+            let thumb = winner.data.thumb || winner.data.cover || "";
+            if (!thumb && isYoutube) {
+              const ytMatch = url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+              if (ytMatch) thumb = `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`;
+            }
+
+            const streamUrl = `/api/stream?url=${encodeURIComponent(winner.data.url)}&filename=${encodeURIComponent(safeFilename)}&src=${encodeURIComponent(url)}`;
+            const fallbackUrl = `/api/media?src=${encodeURIComponent(url)}&quality=720&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
+
+            return res.json({
+              status: "stream",
+              url: streamUrl,
+              previewUrl: streamUrl,
+              fallbackUrl,
+              title: winner.data.filename || "video",
+              thumb,
+              filename: safeFilename,
+            });
+          } else {
+            console.log(`Cobalt stream URL from ${winner.endpoint} failed liveness check; falling back to yt-dlp.`);
           }
-          return res.json({
-            status: "stream",
-            url: `/api/stream?url=${encodeURIComponent(winner.data.url)}&filename=${encodeURIComponent(safeFilename)}`,
-            title: winner.data.filename || "video",
-            thumb,
-            filename: safeFilename,
-          });
         }
 
         if (winner.data.picker) {
           const mappedPicker = winner.data.picker.map((item: any, idx: number) => {
             const safeFilename = `media_${idx + 1}.${item.type === "video" ? "mp4" : "jpg"}`;
+            const itemStreamUrl = `/api/stream?url=${encodeURIComponent(item.url)}&filename=${encodeURIComponent(safeFilename)}&src=${encodeURIComponent(url)}`;
+            const itemFallbackUrl = `/api/media?src=${encodeURIComponent(url)}&quality=720&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
             return {
               ...item,
-              url: `/api/stream?url=${encodeURIComponent(item.url)}&filename=${encodeURIComponent(safeFilename)}`,
+              url: itemStreamUrl,
+              previewUrl: itemStreamUrl,
+              fallbackUrl: itemFallbackUrl,
               thumb: item.thumb || item.cover || winner.data.thumb || winner.data.cover || "",
             };
           });
@@ -596,6 +951,7 @@ async function startServer() {
           if (info) {
             const cleanTitle = (info.title || "video").replace(/[^a-zA-Z0-9_.-]/g, "_").substring(0, 50);
 
+            // Handle multi-item playlists / carousels
             if (info._type === "playlist" || (info.entries && info.entries.length > 0)) {
               const entries = info.entries || [];
               const picker = entries.map((entry: any, index: number) => {
@@ -603,10 +959,13 @@ async function startServer() {
                 const safeFilename = `${cleanTitle}_part${index + 1}.${entryExt}`;
                 const entryDirectUrl = entry.url || entry.requested_downloads?.[0]?.url;
                 const streamUrl = entryDirectUrl && !entryDirectUrl.includes(".m3u8") && !entryDirectUrl.includes(".mpd")
-                  ? `/api/stream?url=${encodeURIComponent(entryDirectUrl)}&filename=${encodeURIComponent(safeFilename)}`
+                  ? `/api/stream?url=${encodeURIComponent(entryDirectUrl)}&filename=${encodeURIComponent(safeFilename)}&src=${encodeURIComponent(url)}`
                   : `/api/media?src=${encodeURIComponent(entry.webpage_url || url)}&quality=${videoQuality || "1080"}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
+                const fallbackUrl = `/api/media?src=${encodeURIComponent(entry.webpage_url || url)}&quality=720&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
                 return {
                   url: streamUrl,
+                  previewUrl: streamUrl,
+                  fallbackUrl,
                   type: entry.vcodec === "none" ? "audio" : "video",
                   thumb: entry.thumbnail || entry.thumbnails?.[0]?.url || info.thumbnail || "",
                 };
@@ -615,32 +974,71 @@ async function startServer() {
             }
 
             const safeFilename = `${cleanTitle}.${downloadMode === "audio" ? "mp3" : "mp4"}`;
+            const fallbackMediaUrl = `/api/media?src=${encodeURIComponent(url)}&quality=720&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
 
-            // Prefer pre-muxed combined formats (with both video + audio) for direct browser playback
-            const directCdnUrl =
-              info.formats?.filter((f: any) => f.vcodec !== "none" && f.acodec !== "none" && f.url && f.ext === "mp4" && !f.url.includes(".m3u8") && !f.url.includes(".mpd"))?.pop()?.url ||
+            // Extract best direct download CDN URL (unthrottled high-quality download)
+            const isH264 = (f: any) => {
+              const vc = (f.vcodec || "").toLowerCase();
+              return (vc.includes("avc") || vc.includes("h264")) && !vc.includes("hevc") && !vc.includes("265") && !vc.includes("bytevc");
+            };
+            const isBrowserNative = (f: any) => {
+              const vc = (f.vcodec || "").toLowerCase();
+              return !vc.includes("hevc") && !vc.includes("265") && !vc.includes("bytevc");
+            };
+
+            const directDownloadFormats = info.formats?.filter(
+              (f: any) => f.vcodec !== "none" && f.acodec !== "none" && f.url && f.ext === "mp4" && !f.url.includes(".m3u8") && !f.url.includes(".mpd")
+            ) || [];
+
+            const directCdnDownloadUrl =
+              directDownloadFormats[directDownloadFormats.length - 1]?.url ||
               info.url ||
               info.requested_downloads?.[0]?.url ||
               info.formats?.filter((f: any) => f.vcodec !== "none" && f.url && !f.url.includes(".m3u8") && !f.url.includes(".mpd"))?.pop()?.url;
 
-            if (directCdnUrl && !directCdnUrl.includes(".m3u8") && !directCdnUrl.includes(".mpd")) {
-              console.log(`Direct CDN URL extracted (${directCdnUrl.substring(0, 60)}...) — routing to instant proxy stream!`);
-              return res.json({
-                status: "stream",
-                url: `/api/stream?url=${encodeURIComponent(directCdnUrl)}&filename=${encodeURIComponent(safeFilename)}`,
-                title: info.title || "video",
-                thumb: info.thumbnail || info.thumbnails?.[0]?.url || (isYoutube ? `https://i.ytimg.com/vi/${url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1] || ""}/hqdefault.jpg` : ""),
-                filename: safeFilename,
-              });
+            // Codec-optimized preview selection (prefer H.264 MP4 with audio for 100% browser preview playback)
+            const h264PreviewFormat = directDownloadFormats.filter((f: any) => isH264(f)).pop();
+            const nativePreviewFormat = directDownloadFormats.filter((f: any) => isBrowserNative(f)).pop();
+            const bestPreviewFormat = h264PreviewFormat || nativePreviewFormat || directDownloadFormats[0];
+
+            // Cache cookies and request headers for this media extraction
+            const mediaCookies = info.cookies || "";
+            const mediaHeaders = info.http_headers || {};
+            const contextItem: StreamContext = {
+              headers: mediaHeaders,
+              cookies: mediaCookies,
+              timestamp: Date.now(),
+            };
+
+            if (url) streamContextCache.set(url, contextItem);
+            if (bestPreviewFormat?.url) streamContextCache.set(bestPreviewFormat.url, contextItem);
+            if (directCdnDownloadUrl) streamContextCache.set(directCdnDownloadUrl, contextItem);
+
+            let previewUrl = fallbackMediaUrl;
+            if (bestPreviewFormat && bestPreviewFormat.url && !bestPreviewFormat.url.includes(".m3u8") && !bestPreviewFormat.url.includes(".mpd")) {
+              previewUrl = `/api/stream?url=${encodeURIComponent(bestPreviewFormat.url)}&filename=${encodeURIComponent(safeFilename)}&src=${encodeURIComponent(url)}`;
             }
 
-            // Fallback for complex DASH/HLS streams needing yt-dlp pipe
-            console.log(`yt-dlp metadata ready — routing to media pipe for: ${url.substring(0, 60)}`);
+            let downloadUrl = fallbackMediaUrl;
+            if (directCdnDownloadUrl && !directCdnDownloadUrl.includes(".m3u8") && !directCdnDownloadUrl.includes(".mpd")) {
+              downloadUrl = `/api/stream?url=${encodeURIComponent(directCdnDownloadUrl)}&filename=${encodeURIComponent(safeFilename)}&src=${encodeURIComponent(url)}`;
+            }
+
+            let thumb = info.thumbnail || info.thumbnails?.[0]?.url || "";
+            if (!thumb && isYoutube) {
+              const ytMatch = url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+              if (ytMatch) thumb = `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`;
+            }
+
+            console.log(`[Preview] yt-dlp metadata ready. Preview stream: ${previewUrl.substring(0, 60)}, Download stream: ${downloadUrl.substring(0, 60)}`);
+
             return res.json({
               status: "stream",
-              url: `/api/media?src=${encodeURIComponent(url)}&quality=${videoQuality || "1080"}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`,
+              url: downloadUrl,
+              previewUrl,
+              fallbackUrl: fallbackMediaUrl,
               title: info.title || "video",
-              thumb: info.thumbnail || info.thumbnails?.[0]?.url || (isYoutube ? `https://i.ytimg.com/vi/${url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1] || ""}/hqdefault.jpg` : ""),
+              thumb,
               filename: safeFilename,
             });
           }
@@ -649,7 +1047,13 @@ async function startServer() {
         }
       }
 
-      throw new Error("Unable to extract direct video stream. Please verify the URL and try again.");
+      if (platform === "twitter") {
+        throw new Error("Unable to extract media from this Twitter/X post. Please verify that the post contains a video or GIF. (If the post is sensitive/age-restricted, Twitter/X may require authentication cookies).");
+      } else if (platform === "tiktok") {
+        throw new Error("Unable to extract media from this TikTok URL. Please verify the link and try again.");
+      } else {
+        throw new Error("Unable to extract direct media stream. Please verify the URL and try again.");
+      }
     } catch (error: any) {
       console.error("Download route error:", error);
       return res.status(500).json({
@@ -659,8 +1063,6 @@ async function startServer() {
   });
 
   // Direct yt-dlp Media Streaming Endpoint
-  // Spawns yt-dlp with -o - to pipe audio/video directly to the browser.
-  // Prioritises single pre-muxed streams (no ffmpeg needed).
   app.get("/api/media", (req, res) => {
     const { src, quality, mode, filename, dl } = req.query;
 
@@ -668,121 +1070,41 @@ async function startServer() {
       return res.status(400).send("Missing src parameter");
     }
 
-    if (!isYtDlpAvailable) {
-      return res.status(503).send("yt-dlp not available for direct media streaming");
+    if (!isSafeUrl(src)) {
+      return res.status(400).send("Invalid media source URL");
     }
 
     const isDownload = dl === "1" || dl === "true";
     const isAudio = mode === "audio";
-    const targetHeight = parseInt(quality as string) || 1080;
+    const targetHeight = parseInt(quality as string) || 720;
     const safeFilename = (filename as string) || (isAudio ? "audio.mp3" : "video.mp4");
 
-    // Build format selector string — prioritise pre-muxed single stream (no ffmpeg required)
-    const formatStr = isAudio
-      ? "bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio/ba"
-      : `best[height<=${targetHeight}][ext=mp4]/best[ext=mp4]/b[ext=mp4]/best/b`;
-
-    const isYoutube = /youtube\.com|youtu\.be/.test(src);
-    const isTiktok = /tiktok\.com/.test(src);
-
-    const args: string[] = [
-      "-4",
-      "--no-playlist",
-      "--no-check-certificate",
-      "--no-warnings",
-      "-f", formatStr,
-      "-o", "-",  // pipe output to stdout
-    ];
-
-    if (isYoutube) {
-      args.push("--extractor-args", "youtube:player_client=web,android");
-    }
-
-    if (isTiktok) {
-      args.push("--extractor-args", "tiktok:api_hostname=api16-normal-c-useast1a.tiktokv.com");
-    }
-
-    // Inject Instagram session cookie if available
-    const cookieFile = getInstagramCookieFile();
-    if (cookieFile && src.includes("instagram")) {
-      args.push("--cookies", cookieFile);
-    }
-
-    args.push(src);
-
-    console.log(`/api/media: yt-dlp streaming ${isAudio ? "audio" : `video@${targetHeight}p`} for ${src.substring(0, 60)}...`);
-    const proc = spawn(ytDlpPath, args, { windowsHide: true });
-
-    let dataStarted = false;
-
-    proc.stdout.on("data", (chunk: Buffer) => {
-      if (!dataStarted) {
-        dataStarted = true;
-        // Send headers on first data chunk
-        const contentType = isAudio ? "audio/mpeg" : "video/mp4";
-        const disposition = isDownload
-          ? `attachment; filename="${safeFilename}"`
-          : `inline; filename="${safeFilename}"`;
-        res.writeHead(200, {
-          "Content-Type": contentType,
-          "Content-Disposition": disposition,
-          "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-store",
-          "Transfer-Encoding": "chunked",
-          "X-Content-Type-Options": "nosniff",
-        });
-      }
-      res.write(chunk);
-    });
-
-    proc.stdout.on("end", () => {
-      if (!dataStarted && !res.headersSent) {
-        res.status(502).send("yt-dlp produced no media output. The URL may be unavailable or geo-blocked.");
-      } else {
-        res.end();
-      }
-    });
-
-    proc.stderr.on("data", (data: Buffer) => {
-      const msg = data.toString();
-      // Only log actual errors, not progress lines
-      if (!msg.startsWith("[download]") && !msg.startsWith("[info]") && !msg.startsWith("[youtube]")) {
-        console.error("yt-dlp media stderr:", msg.substring(0, 300));
-      }
-    });
-
-    proc.on("error", (err: Error) => {
-      console.error("yt-dlp spawn error:", err);
-      if (!res.headersSent) {
-        res.status(500).send("Failed to start yt-dlp media process");
-      }
-    });
-
-    proc.on("close", (code: number | null) => {
-      console.log(`/api/media: yt-dlp exited with code ${code}`);
-      if (!res.writableEnded) res.end();
-    });
-
-    // If client disconnects (e.g. user navigates away), kill yt-dlp
-    res.on("close", () => {
-      if (!proc.killed) {
-        proc.kill("SIGTERM");
-      }
+    pipeYtDlpMedia(src, req, res, {
+      isDownload,
+      isAudio,
+      targetHeight,
+      safeFilename,
     });
   });
 
-  // CDN Proxy Streaming Endpoint (used for Cobalt-returned CDN URLs)
-  // Range-aware: supports seek & inline preview for direct CDN links
-  app.get("/api/stream", (req, res) => {
-    const { url, filename, dl } = req.query;
+  // CDN Proxy Streaming Endpoint (used for Cobalt & direct CDN URLs)
+  // Range-aware: supports seek & inline preview with auto-fallback to yt-dlp on upstream failure
+  app.get("/api/stream", async (req, res) => {
+    const { url, filename, dl, src, mode, quality } = req.query;
     if (!url || typeof url !== "string") {
       return res.status(400).send("Missing URL parameter");
     }
 
-    const isDownload = dl === "1" || dl === "true";
-    const safeFilename = (filename as string) || "download.mp4";
+    if (!isSafeUrl(url)) {
+      return res.status(400).send("Invalid media URL");
+    }
 
-    console.log(`Piping media stream (${isDownload ? "DOWNLOAD" : "PREVIEW"}): ${url.substring(0, 60)}...`);
+    const isDownload = dl === "1" || dl === "true";
+    const isAudio = mode === "audio" || (typeof filename === "string" && filename.endsWith(".mp3"));
+    const safeFilename = (filename as string) || (isAudio ? "audio.mp3" : "video.mp4");
+    const originalSrc = typeof src === "string" && isSafeUrl(src) ? src : null;
+
+    console.log(`[Stream Proxy] Piping media (${isDownload ? "DOWNLOAD" : "PREVIEW"}): ${url.substring(0, 60)}...`);
 
     const lowerUrl = url.toLowerCase();
     let referer = "https://www.youtube.com/";
@@ -790,19 +1112,46 @@ async function startServer() {
       referer = "https://twitter.com/";
     } else if (lowerUrl.includes("instagram") || lowerUrl.includes("cdninstagram") || lowerUrl.includes("fbcdn")) {
       referer = "https://www.instagram.com/";
-    } else if (lowerUrl.includes("tiktok") || lowerUrl.includes("tiktokv") || lowerUrl.includes("byteoversea") || lowerUrl.includes("muscdn") || lowerUrl.includes("ibyteimg")) {
+    } else if (lowerUrl.includes("tiktok") || lowerUrl.includes("tiktokv") || lowerUrl.includes("tiktokcdn") || lowerUrl.includes("byteoversea") || lowerUrl.includes("muscdn") || lowerUrl.includes("ibyteimg")) {
       referer = "https://www.tiktok.com/";
+    } else if (lowerUrl.includes("facebook") || lowerUrl.includes("fb.com")) {
+      referer = "https://www.facebook.com/";
+    } else if (lowerUrl.includes("reddit") || lowerUrl.includes("redd.it")) {
+      referer = "https://www.reddit.com/";
     }
+
+    // Look up cached session headers and cookies
+    const cachedContext = streamContextCache.get(url) || (originalSrc ? streamContextCache.get(originalSrc) : undefined);
 
     const clientHeaders: Record<string, string> = {
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Referer": referer,
+        cachedContext?.headers?.["User-Agent"] ||
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+      "Referer": cachedContext?.headers?.["Referer"] || referer,
+      "Accept": "*/*",
     };
+
+    if (cachedContext?.cookies) {
+      clientHeaders["Cookie"] = cachedContext.cookies;
+    }
 
     if (req.headers.range) {
       clientHeaders["range"] = req.headers.range as string;
     }
+
+    const fallbackToYtDlp = () => {
+      if (originalSrc && isYtDlpAvailable && !res.headersSent) {
+        console.log(`[Preview Fallback] Upstream failed, seamlessly streaming via yt-dlp media pipe for: ${originalSrc.substring(0, 60)}...`);
+        return pipeYtDlpMedia(originalSrc, req, res, {
+          isDownload,
+          isAudio,
+          safeFilename,
+          targetHeight: parseInt(quality as string) || 720,
+        });
+      } else if (!res.headersSent) {
+        res.status(502).send("Media stream unavailable");
+      }
+    };
 
     try {
       const parsedUrl = new URL(url);
@@ -811,21 +1160,30 @@ async function startServer() {
       const reqOpts: any = {
         headers: clientHeaders,
         rejectUnauthorized: false,
+        timeout: 8000,
       };
 
       const request = protocol.get(url, reqOpts, (response) => {
         // Handle redirect if the CDN returned 301/302/307/308
         if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
           const redirectUrl = response.headers.location;
-          console.log("Redirecting stream to:", redirectUrl);
-          const dlFlag = isDownload ? "&dl=1" : "";
-          res.redirect(`/api/stream?url=${encodeURIComponent(redirectUrl)}&filename=${encodeURIComponent(safeFilename)}${dlFlag}`);
-          return;
+          if (isSafeUrl(redirectUrl)) {
+            const dlFlag = isDownload ? "&dl=1" : "";
+            const srcParam = originalSrc ? `&src=${encodeURIComponent(originalSrc)}` : "";
+            res.redirect(`/api/stream?url=${encodeURIComponent(redirectUrl)}&filename=${encodeURIComponent(safeFilename)}${dlFlag}${srcParam}`);
+            return;
+          }
+        }
+
+        // If upstream returned error (403, 404, 410, 500, etc.), fall back internally
+        if (response.statusCode && (response.statusCode >= 400 || response.statusCode < 200)) {
+          console.warn(`[Stream Proxy] Upstream returned status ${response.statusCode} for ${url.substring(0, 60)}`);
+          return fallbackToYtDlp();
         }
 
         let rawContentType = response.headers["content-type"];
-        let contentType = "video/mp4";
-        if (rawContentType && !rawContentType.includes("octet-stream") && !rawContentType.includes("text/plain")) {
+        let contentType = isAudio ? "audio/mpeg" : "video/mp4";
+        if (rawContentType && !rawContentType.includes("octet-stream") && !rawContentType.includes("text/plain") && !rawContentType.includes("text/html")) {
           contentType = rawContentType;
         } else if (safeFilename.endsWith(".mp3")) {
           contentType = "audio/mpeg";
@@ -845,7 +1203,7 @@ async function startServer() {
           "Access-Control-Allow-Headers": "Range",
           "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
         };
-        // Only include Content-Length and Content-Range if they are present and non-empty
+
         const contentLength = response.headers["content-length"] || response.headers["estimated-content-length"];
         if (contentLength) headers["Content-Length"] = contentLength as string;
         if (response.headers["content-range"]) headers["Content-Range"] = response.headers["content-range"];
@@ -857,35 +1215,37 @@ async function startServer() {
         }
 
         res.writeHead(response.statusCode || 200, headers);
-        
+
         response.on("error", (err) => {
-          console.warn("Incoming stream chunk error:", err.message);
+          console.warn("[Stream Proxy] Incoming chunk error:", err.message);
           res.end();
         });
 
         res.on("error", (err) => {
-          console.warn("Outgoing client stream error:", err.message);
+          console.warn("[Stream Proxy] Outgoing client error:", err.message);
           request.destroy();
         });
 
         response.pipe(res);
       });
 
+      request.on("timeout", () => {
+        request.destroy();
+        console.warn(`[Stream Proxy] Request timed out for: ${url.substring(0, 60)}`);
+        fallbackToYtDlp();
+      });
+
       request.on("error", (err) => {
-        console.error("Proxy streaming request failure:", err.message);
-        if (!res.headersSent) {
-          res.status(500).send("Media streaming failed");
-        }
+        console.warn("[Stream Proxy] Upstream connection error:", err.message);
+        fallbackToYtDlp();
       });
 
       res.on("close", () => {
         request.destroy();
       });
     } catch (e: any) {
-      console.error("Invalid URL passed to stream proxy:", e.message);
-      if (!res.headersSent) {
-        res.status(400).send("Invalid stream URL");
-      }
+      console.error("[Stream Proxy] Invalid URL passed:", e.message);
+      fallbackToYtDlp();
     }
   });
 

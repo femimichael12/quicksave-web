@@ -22,10 +22,11 @@ FROM node:22-slim AS runner
 
 WORKDIR /app
 
-# Install curl for yt-dlp download + ca-certificates
+# Install curl for yt-dlp download + ca-certificates + ffmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Download yt-dlp Linux binary and bake it into the image

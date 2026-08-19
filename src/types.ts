@@ -5,6 +5,8 @@
 
 export interface PickerItem {
   url: string;
+  previewUrl?: string;
+  fallbackUrl?: string;
   type: "video" | "photo" | "audio" | "gif";
   thumb?: string;
 }
@@ -12,6 +14,8 @@ export interface PickerItem {
 export interface DownloadResult {
   status: "redirect" | "stream" | "picker" | "error";
   url?: string;
+  previewUrl?: string;
+  fallbackUrl?: string;
   picker?: PickerItem[];
   text?: string;
   title?: string;
@@ -28,4 +32,17 @@ export interface MarketingBundle {
   hook: string;
 }
 
-export type Platform = "twitter" | "instagram" | "youtube" | "tiktok" | "unknown";
+export type Platform =
+  | "twitter"
+  | "instagram"
+  | "youtube"
+  | "tiktok"
+  | "facebook"
+  | "reddit"
+  | "pinterest"
+  | "threads"
+  | "twitch"
+  | "vimeo"
+  | "other"
+  | "unknown";
+

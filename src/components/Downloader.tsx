@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Link2, Sparkles, Download, RefreshCw, AlertCircle, FileVideo, FileImage, Clipboard, Check, Play, Settings2 } from "lucide-react";
+import { Link2, Download, RefreshCw, AlertCircle, FileVideo, FileImage, Clipboard, Check, Play, Settings2, ChevronLeft, ChevronRight } from "lucide-react";
 import { DownloadResult, Platform } from "../types";
 
 export default function Downloader() {
@@ -18,14 +18,25 @@ export default function Downloader() {
   const [copiedLink, setCopiedLink] = useState(false);
   const [videoLoading, setVideoLoading] = useState(true);
   const [videoError, setVideoError] = useState(false);
+  const [previewFallbackAttempt, setPreviewFallbackAttempt] = useState(0);
   const [selectedPickerIndex, setSelectedPickerIndex] = useState(0);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // Detect platform based on URL
   const getPlatform = (inputUrl: string): Platform => {
-    if (/twitter\.com|x\.com/.test(inputUrl)) return "twitter";
-    if (/instagram\.com/.test(inputUrl)) return "instagram";
-    if (/youtube\.com|youtu\.be/.test(inputUrl)) return "youtube";
-    if (/tiktok\.com/.test(inputUrl)) return "tiktok";
+    const lower = inputUrl.toLowerCase();
+    if (/twitter\.com|x\.com|t\.co/.test(lower)) return "twitter";
+    if (/instagram\.com/.test(lower)) return "instagram";
+    if (/youtube\.com|youtu\.be/.test(lower)) return "youtube";
+    if (/tiktok\.com|tiktokv\.com|douyin\.com/.test(lower)) return "tiktok";
+    if (/facebook\.com|fb\.watch|fb\.com/.test(lower)) return "facebook";
+    if (/reddit\.com|redd\.it/.test(lower)) return "reddit";
+    if (/pinterest\.com|pin\.it/.test(lower)) return "pinterest";
+    if (/threads\.net/.test(lower)) return "threads";
+    if (/twitch\.tv/.test(lower)) return "twitch";
+    if (/vimeo\.com/.test(lower)) return "vimeo";
+    if (/^https?:\/\//i.test(lower)) return "other";
     return "unknown";
   };
 
@@ -35,16 +46,23 @@ export default function Downloader() {
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
+  // Reset preview states when switching items
+  useEffect(() => {
+    setPreviewFallbackAttempt(0);
+    setVideoLoading(true);
+    setVideoError(false);
+  }, [selectedPickerIndex]);
+
   const handleDownload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url) {
-      setError("Please paste a valid Twitter (X), Instagram, YouTube, or TikTok link.");
+      setError("Please paste a valid video or social media link.");
       return;
     }
 
     const platform = getPlatform(url);
     if (platform === "unknown") {
-      setError("Invalid URL. Twitter (X), Instagram, YouTube, and TikTok URLs are supported.");
+      setError("Invalid URL. Please enter a valid http/https video link.");
       return;
     }
 
@@ -53,6 +71,7 @@ export default function Downloader() {
     setResult(null);
     setVideoLoading(true);
     setVideoError(false);
+    setPreviewFallbackAttempt(0);
     setSelectedPickerIndex(0);
 
     try {
@@ -71,7 +90,7 @@ export default function Downloader() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to download media.");
+        throw new Error(data.error || "Failed to extract media.");
       }
 
       if (data.status === "error") {
@@ -80,7 +99,7 @@ export default function Downloader() {
 
       setResult(data);
     } catch (err: any) {
-      console.error(err);
+      console.error("[Downloader Error]", err);
       setError(err.message || "Something went wrong extracting media streams. Please check your link and try again.");
     } finally {
       setIsLoading(false);
@@ -91,6 +110,8 @@ export default function Downloader() {
     setUrl("");
     setResult(null);
     setError(null);
+    setPreviewFallbackAttempt(0);
+    setSelectedPickerIndex(0);
   };
 
   return (
@@ -105,30 +126,30 @@ export default function Downloader() {
             className="text-2xl sm:text-5xl md:text-6xl font-medium font-display tracking-tight text-gray-950 leading-tight sm:leading-none"
             id="downloader-heading"
           >
-            <span className="text-blue-500 font-light">Twitter</span>,{" "}
-            <span className="text-pink-500 font-light">Instagram</span>,{" "}
-            <span className="text-red-500 font-light">YouTube</span> &{" "}
-            <span className="text-teal-500 font-light">TikTok</span>
+            <span className="text-teal-500 font-light">TikTok</span>,{" "}
+            <span className="text-red-500 font-light">YouTube</span>,{" "}
+            <span className="text-pink-500 font-light">Instagram</span> &{" "}
+            <span className="text-blue-500 font-light">Twitter</span>
             <br className="hidden sm:inline" /> Video Downloader
           </motion.h1>
           <p className="text-xs sm:text-base md:text-lg text-gray-500 max-w-2xl mx-auto font-sans font-light leading-tight sm:leading-relaxed" id="downloader-subheading">
-            <span className="sm:hidden">Download videos quickly and easily.</span>
-            <span className="hidden sm:inline">Download high-quality videos, Shorts, Reels, GIFs, and audio tracks from Twitter (X), Instagram, YouTube, and TikTok. Completely free.</span>
+            <span className="sm:hidden">Download high-speed videos with instant preview playback.</span>
+            <span className="hidden sm:inline">Download high-quality videos, Shorts, Reels, clips, GIFs, and MP3 audio from TikTok, YouTube, Instagram, and Twitter (X). Completely free.</span>
           </p>
 
           {/* Supported Platforms Badges */}
           <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 pt-1 sm:pt-2" id="supported-platforms-badges">
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[11px] sm:text-xs font-medium bg-blue-50 text-blue-600 border border-blue-100">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span> Twitter / X
-            </span>
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[11px] sm:text-xs font-medium bg-pink-50 text-pink-600 border border-pink-100">
-              <span className="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse"></span> Instagram
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[11px] sm:text-xs font-medium bg-teal-50 text-teal-600 border border-teal-100">
+              <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></span> TikTok
             </span>
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[11px] sm:text-xs font-medium bg-red-50 text-red-600 border border-red-100">
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span> YouTube
             </span>
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[11px] sm:text-xs font-medium bg-teal-50 text-teal-600 border border-teal-100">
-              <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></span> TikTok
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[11px] sm:text-xs font-medium bg-pink-50 text-pink-600 border border-pink-100">
+              <span className="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse"></span> Instagram
+            </span>
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[11px] sm:text-xs font-medium bg-blue-50 text-blue-600 border border-blue-100">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span> Twitter / X
             </span>
           </div>
         </div>
@@ -146,7 +167,7 @@ export default function Downloader() {
                 required
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="Paste link e.g. https://youtube.com/watch?v=... or tiktok.com/..."
+                placeholder="Paste link e.g. https://tiktok.com/@... or https://youtube.com/watch?v=..."
                 className="w-full pl-10 sm:pl-12 pr-4 py-3 sm:py-4 text-sm sm:text-base rounded-2xl border border-gray-200 bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 shadow-sm sm:shadow-md shadow-gray-100/50 transition-all"
               />
             </div>
@@ -236,9 +257,9 @@ export default function Downloader() {
             <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 mb-6">
               <RefreshCw className="h-8 w-8 animate-spin" />
             </div>
-            <h3 className="text-xl font-bold text-gray-900">Connecting to High-Speed Media Server...</h3>
+            <h3 className="text-xl font-bold text-gray-900">Connecting to Media Pipeline...</h3>
             <p className="mt-2 text-sm text-gray-500 max-w-sm">
-              We are fetching direct high-speed CDN streams for your link.
+              Fetching high-speed stream and generating browser-compatible preview.
             </p>
           </motion.div>
         )}
@@ -270,16 +291,17 @@ export default function Downloader() {
 
         {result && (
           (() => {
-            let activeMediaUrl = "";
-            let activePoster = "";
+            let activeDownloadUrl = result.url || "";
+            let activePreviewUrl = result.previewUrl || result.url || "";
+            let activeFallbackUrl = result.fallbackUrl || "";
+            let activePoster = result.thumb || "";
             let activeItemType: "video" | "audio" | "photo" | "gif" = mode === "audio" ? "audio" : "video";
 
-            if ((result.status === "redirect" || result.status === "stream") && result.url) {
-              activeMediaUrl = result.url;
-              activePoster = result.thumb || "";
-            } else if (result.status === "picker" && result.picker && result.picker.length > 0) {
+            if (result.status === "picker" && result.picker && result.picker.length > 0) {
               const item = result.picker[selectedPickerIndex] || result.picker[0];
-              activeMediaUrl = item.url;
+              activeDownloadUrl = item.url;
+              activePreviewUrl = item.previewUrl || item.url;
+              activeFallbackUrl = item.fallbackUrl || "";
               activePoster = item.thumb || result.thumb || "";
               activeItemType = item.type || "video";
             }
@@ -290,7 +312,25 @@ export default function Downloader() {
               return match ? match[1] : null;
             };
 
-            const youtubeId = getYoutubeId(url) || getYoutubeId(activeMediaUrl) || getYoutubeId(result.url || "");
+            const youtubeId = getYoutubeId(url) || getYoutubeId(activeDownloadUrl) || getYoutubeId(result.url || "");
+
+            // Effective media stream URL based on fallback state
+            const currentStreamUrl = previewFallbackAttempt === 1 && activeFallbackUrl
+              ? activeFallbackUrl
+              : activePreviewUrl;
+
+            const handleVideoError = () => {
+              console.warn(`[Preview] Error loading stream: ${currentStreamUrl}`);
+              if (previewFallbackAttempt === 0 && activeFallbackUrl && activeFallbackUrl !== currentStreamUrl) {
+                console.log(`[Preview Fallback] Automatically switching to secondary media pipe: ${activeFallbackUrl}`);
+                setPreviewFallbackAttempt(1);
+                setVideoLoading(true);
+                setVideoError(false);
+              } else {
+                setVideoLoading(false);
+                setVideoError(true);
+              }
+            };
 
             return (
               <motion.div
@@ -305,111 +345,117 @@ export default function Downloader() {
                   <div className="flex flex-col lg:flex-row gap-6 items-start">
                     
                     {/* Media Preview Player */}
-                    {activeMediaUrl && (
-                      <div className="w-full lg:w-80 shrink-0 bg-gray-900 rounded-2xl overflow-hidden min-h-[220px] max-h-[480px] relative flex items-center justify-center border border-gray-800 shadow-inner group" id="video-preview-container">
-                        {activeItemType === "audio" ? (
-                          <div className="w-full p-6 text-center space-y-4">
-                            <div className="w-16 h-16 rounded-full bg-blue-500/20 text-blue-400 mx-auto flex items-center justify-center">
-                              <Play className="h-8 w-8 fill-current ml-1" />
-                            </div>
-                            <span className="text-xs font-semibold text-gray-300 block">Audio Preview (MP3)</span>
-                            <audio
-                              src={activeMediaUrl}
-                              controls
-                              className="w-full"
-                              onLoadStart={() => { setVideoLoading(true); setVideoError(false); }}
-                              onCanPlay={() => setVideoLoading(false)}
-                              onError={() => { setVideoLoading(false); setVideoError(true); }}
-                            />
+                    <div className="w-full lg:w-80 shrink-0 bg-gray-900 rounded-2xl overflow-hidden min-h-[220px] max-h-[480px] relative flex items-center justify-center border border-gray-800 shadow-inner group" id="video-preview-container">
+                      {activeItemType === "audio" ? (
+                        <div className="w-full p-6 text-center space-y-4">
+                          <div className="w-16 h-16 rounded-full bg-blue-500/20 text-blue-400 mx-auto flex items-center justify-center">
+                            <Play className="h-8 w-8 fill-current ml-1" />
                           </div>
-                        ) : activeItemType === "photo" ? (
-                          <img
-                            src={activeMediaUrl}
-                            alt="Preview"
-                            className="w-full h-full max-h-[480px] object-contain"
+                          <span className="text-xs font-semibold text-gray-300 block">Audio Preview (MP3)</span>
+                          <audio
+                            src={currentStreamUrl}
+                            controls
+                            className="w-full"
+                            onLoadStart={() => { setVideoLoading(true); setVideoError(false); }}
+                            onCanPlay={() => setVideoLoading(false)}
+                            onError={handleVideoError}
                           />
-                        ) : youtubeId ? (
-                          <div className="w-full h-full min-h-[220px] max-h-[480px] aspect-video relative">
-                            <iframe
-                              src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=0&rel=0&modestbranding=1`}
-                              title={result.title || "YouTube Video Preview"}
-                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                              allowFullScreen
-                              className="w-full h-full border-0 rounded-2xl"
-                            />
+                        </div>
+                      ) : activeItemType === "photo" ? (
+                        <div className="w-full h-full min-h-[220px] max-h-[480px] flex items-center justify-center bg-gray-950">
+                          <img
+                            src={activePoster || currentStreamUrl}
+                            alt="Media item preview"
+                            className="w-full h-full max-h-[480px] object-contain rounded-2xl"
+                            loading="lazy"
+                          />
+                        </div>
+                      ) : youtubeId ? (
+                        <div className="w-full h-full min-h-[220px] max-h-[480px] aspect-video relative">
+                          <iframe
+                            src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=0&rel=0&modestbranding=1`}
+                            title={result.title || "YouTube Video Preview"}
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowFullScreen
+                            className="w-full h-full border-0 rounded-2xl"
+                          />
+                          <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white uppercase backdrop-blur-sm pointer-events-none z-10">
+                            <Play className="h-3 w-3 text-blue-400 fill-current" /> Preview
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <video
+                            ref={videoRef}
+                            key={`${currentStreamUrl}_${selectedPickerIndex}_${previewFallbackAttempt}`}
+                            src={currentStreamUrl}
+                            poster={activePoster || undefined}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            onLoadStart={() => {
+                              setVideoLoading(true);
+                              setVideoError(false);
+                            }}
+                            onLoadedMetadata={() => {
+                              setVideoLoading(false);
+                            }}
+                            onCanPlay={() => {
+                              setVideoLoading(false);
+                            }}
+                            onWaiting={() => {
+                              setVideoLoading(true);
+                            }}
+                            onError={handleVideoError}
+                            className="w-full h-full max-h-[480px] object-contain cursor-pointer"
+                          />
+
+                          {/* Loading Overlay */}
+                          {videoLoading && !videoError && (
+                            <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex flex-col items-center justify-center gap-2 text-white pointer-events-none transition-opacity">
+                              <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
+                              <span className="text-xs font-medium text-gray-200">
+                                {previewFallbackAttempt > 0 ? "Connecting Fallback Stream..." : "Loading Preview..."}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Error Overlay with Clean Thumbnail Notice */}
+                          {videoError && (
+                            <div className="absolute inset-0 bg-gray-900/95 p-4 flex flex-col items-center justify-center text-center space-y-3 z-20">
+                              <AlertCircle className="h-8 w-8 text-amber-400" />
+                              <div className="space-y-1">
+                                <p className="text-xs font-semibold text-white">Preview Playback Notice</p>
+                                <p className="text-[11px] text-gray-400 max-w-[220px] leading-tight">
+                                  Direct browser preview is ready via alternative stream. You can retry or download the file directly below.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewFallbackAttempt((prev) => (prev === 0 ? 1 : 0));
+                                  setVideoError(false);
+                                  setVideoLoading(true);
+                                  if (videoRef.current) {
+                                    videoRef.current.load();
+                                  }
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors cursor-pointer"
+                              >
+                                Retry Preview
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Preview Tag Badge */}
+                          {!videoLoading && !videoError && (
                             <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white uppercase backdrop-blur-sm pointer-events-none z-10">
                               <Play className="h-3 w-3 text-blue-400 fill-current" /> Preview
                             </div>
-                          </div>
-                        ) : (
-                          <>
-                            <video
-                              key={activeMediaUrl}
-                              src={activeMediaUrl}
-                              poster={activePoster || undefined}
-                              controls
-                              playsInline
-                              preload="metadata"
-                              onLoadStart={() => {
-                                setVideoLoading(true);
-                                setVideoError(false);
-                              }}
-                              onLoadedMetadata={() => {
-                                setVideoLoading(false);
-                              }}
-                              onCanPlay={() => {
-                                setVideoLoading(false);
-                              }}
-                              onError={() => {
-                                setVideoLoading(false);
-                                setVideoError(true);
-                              }}
-                              className="w-full h-full max-h-[480px] object-contain cursor-pointer"
-                            />
-
-                            {/* Loading Overlay */}
-                            {videoLoading && !videoError && (
-                              <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex flex-col items-center justify-center gap-2 text-white pointer-events-none transition-opacity">
-                                <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
-                                <span className="text-xs font-medium text-gray-200">Loading Preview...</span>
-                              </div>
-                            )}
-
-                            {/* Error Overlay */}
-                            {videoError && (
-                              <div className="absolute inset-0 bg-gray-900/95 p-4 flex flex-col items-center justify-center text-center space-y-3 z-20">
-                                <AlertCircle className="h-8 w-8 text-amber-400" />
-                                <div className="space-y-1">
-                                  <p className="text-xs font-semibold text-white">Preview Playback Notice</p>
-                                  <p className="text-[11px] text-gray-400 max-w-[220px] leading-tight">
-                                    Direct browser preview playback is constrained by source media encoding. You can still download the complete file below.
-                                  </p>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setVideoError(false);
-                                    setVideoLoading(true);
-                                    const videoEl = document.querySelector('video');
-                                    if (videoEl) videoEl.load();
-                                  }}
-                                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors cursor-pointer"
-                                >
-                                  Retry Preview
-                                </button>
-                              </div>
-                            )}
-
-                            {/* Preview Tag Badge */}
-                            {!videoLoading && !videoError && (
-                              <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white uppercase backdrop-blur-sm pointer-events-none z-10">
-                                <Play className="h-3 w-3 text-blue-400 fill-current" /> Preview
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
+                          )}
+                        </>
+                      )}
+                    </div>
 
                     {/* Media Detail & Action Column */}
                     <div className="flex-1 min-w-0 space-y-6 w-full overflow-hidden">
@@ -425,11 +471,11 @@ export default function Downloader() {
                         </p>
                       </div>
 
-                      {/* If it's a redirect / single stream */}
-                      {(result.status === "redirect" || result.status === "stream") && result.url && (
+                      {/* Single download actions */}
+                      {(result.status === "redirect" || result.status === "stream") && activeDownloadUrl && (
                         <div className="space-y-3" id="single-download-actions">
                           <a
-                            href={`${result.url}&dl=1`}
+                            href={`${activeDownloadUrl}&dl=1`}
                             download={result.filename || "download.mp4"}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -442,7 +488,7 @@ export default function Downloader() {
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
                             <button
                               type="button"
-                              onClick={() => handleCopyLink(`${window.location.origin}${result.url}&dl=1`)}
+                              onClick={() => handleCopyLink(`${window.location.origin}${activeDownloadUrl}&dl=1`)}
                               className="flex items-center justify-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
                             >
                               {copiedLink ? (
@@ -466,12 +512,35 @@ export default function Downloader() {
                         </div>
                       )}
 
-                      {/* If it's a multiple media picker (Instagram Carousel / Multiple Photos) */}
+                      {/* Multiple media picker (Instagram Carousel / Album Items) */}
                       {result.status === "picker" && result.picker && (
                         <div className="space-y-4 w-full" id="picker-download-grid">
-                          <span className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
-                            Choose elements to preview & download ({result.picker.length} item(s) found):
-                          </span>
+                          <div className="flex items-center justify-between">
+                            <span className="block text-xs font-semibold uppercase tracking-wider text-gray-500">
+                              Item {selectedPickerIndex + 1} of {result.picker.length}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={selectedPickerIndex <= 0}
+                                onClick={() => setSelectedPickerIndex((prev) => Math.max(0, prev - 1))}
+                                className="p-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+                                title="Previous item"
+                              >
+                                <ChevronLeft className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={selectedPickerIndex >= result.picker.length - 1}
+                                onClick={() => setSelectedPickerIndex((prev) => Math.min(result.picker!.length - 1, prev + 1))}
+                                className="p-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+                                title="Next item"
+                              >
+                                <ChevronRight className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[350px] overflow-y-auto pr-1">
                             {result.picker.map((item, index) => (
                               <div
@@ -487,7 +556,7 @@ export default function Downloader() {
                                   {item.thumb ? (
                                     <img
                                       src={item.thumb}
-                                      alt="Media preview"
+                                      alt="Media preview thumbnail"
                                       className="h-10 w-10 object-cover rounded-lg"
                                       referrerPolicy="no-referrer"
                                     />
@@ -517,6 +586,7 @@ export default function Downloader() {
                               </div>
                             ))}
                           </div>
+
                           <button
                             type="button"
                             onClick={clearForm}
@@ -543,20 +613,20 @@ export default function Downloader() {
         </h2>
         
         <p className="text-gray-500 text-sm leading-relaxed mb-6 font-light">
-          QuickSave offers a fast, secure, and fully responsive way to download high-resolution videos, Shorts, Reels, and audio tracks from Twitter (X), Instagram, YouTube, and TikTok. Extract high-speed streams instantly in original upload quality without watermarks or software installation.
+          QuickSave offers a fast, secure, and fully responsive way to download high-resolution videos, Shorts, Reels, and audio tracks from TikTok, YouTube, Instagram, and Twitter (X). Extract high-speed streams instantly in original upload quality with smooth preview playback.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6" id="features-perks-grid">
           <div className="space-y-2">
             <h3 className="font-semibold font-display text-gray-950 text-sm">✓ Direct HD Downloads</h3>
             <p className="text-xs text-gray-400 leading-relaxed font-light">
-              Fetch direct, unthrottled links from Twitter, Instagram, YouTube, and TikTok CDN systems in up to 1080p/4K HD quality.
+              Fetch direct, unthrottled links from TikTok, YouTube, Instagram, and Twitter CDN systems in up to 1080p/4K HD quality.
             </p>
           </div>
           <div className="space-y-2">
-            <h3 className="font-semibold font-display text-gray-950 text-sm">✓ Shorts, Reels & TikTok</h3>
+            <h3 className="font-semibold font-display text-gray-950 text-sm">✓ Instant Media Preview</h3>
             <p className="text-xs text-gray-400 leading-relaxed font-light">
-              Full support for short-form video content including YouTube Shorts, Instagram Reels, and clean no-watermark TikTok clips.
+              Watch and seek high-quality video previews directly in your browser with universal H.264 MP4 playback before downloading.
             </p>
           </div>
           <div className="space-y-2">
@@ -571,4 +641,5 @@ export default function Downloader() {
     </div>
   );
 }
+
 
