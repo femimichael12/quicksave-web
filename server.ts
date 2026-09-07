@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import ffmpegStatic from "ffmpeg-static";
 
 // Load environment variables
 dotenv.config();
@@ -65,12 +66,84 @@ if (platform === "win32") {
   }
 }
 
-const ytDlpPath = path.join(binDir, ytDlpFilename);
+let ytDlpPath = path.join(binDir, ytDlpFilename);
 let isYtDlpAvailable = false;
+let resolvedFfmpegPath: string | null = null;
 
 // Ensure bin directory exists
 if (!fs.existsSync(binDir)) {
   fs.mkdirSync(binDir, { recursive: true });
+}
+
+// Locate FFmpeg across ffmpeg-static npm package, bin directory, env vars, and standard system paths
+function resolveFfmpeg(): string | null {
+  // 1. Check direct imported ffmpegStatic path
+  if (ffmpegStatic && typeof ffmpegStatic === "string" && fs.existsSync(ffmpegStatic)) {
+    return ffmpegStatic;
+  }
+
+  // 2. Check bin directory
+  const localBinFfmpeg = path.join(binDir, platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
+  if (fs.existsSync(localBinFfmpeg)) {
+    return localBinFfmpeg;
+  }
+
+  // 3. Check require for bundled CJS
+  try {
+    const fsReq = require("ffmpeg-static");
+    if (fsReq && typeof fsReq === "string" && fs.existsSync(fsReq)) {
+      return fsReq;
+    }
+  } catch (_) {}
+
+  // 4. Check FFMPEG_PATH environment variable
+  if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
+    return process.env.FFMPEG_PATH;
+  }
+
+  // 5. Check common Linux and Windows paths
+  const candidates = [
+    "/usr/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      return c;
+    }
+  }
+
+  return null;
+}
+
+// Locate existing yt-dlp binary across common locations (Docker, local, system PATH)
+function findExistingYtDlp(): string | null {
+  if (process.env.YT_DLP_PATH && fs.existsSync(process.env.YT_DLP_PATH)) {
+    return process.env.YT_DLP_PATH;
+  }
+
+  const candidates = [
+    path.join(binDir, ytDlpFilename),
+    path.join(binDir, "yt-dlp"),
+    path.join(binDir, "yt-dlp.exe"),
+    path.join(binDir, "yt-dlp_linux"),
+    "/app/bin/yt-dlp",
+    "/app/bin/yt-dlp_linux",
+    "/usr/local/bin/yt-dlp",
+    "/usr/bin/yt-dlp",
+  ];
+
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      try {
+        const stats = fs.statSync(c);
+        if (stats.size >= 1_000_000) {
+          return c;
+        }
+      } catch (_) {}
+    }
+  }
+
+  return null;
 }
 
 // Download yt-dlp binary programmatically (SSL bypass for restrictive networks)
@@ -125,24 +198,25 @@ function downloadYtDlp(): Promise<void> {
   });
 }
 
-// Initialize yt-dlp — awaited before server starts accepting requests
+// Initialize yt-dlp & FFmpeg — awaited before server starts accepting requests
 async function initYtDlp() {
+  // Resolve FFmpeg binary
+  resolvedFfmpegPath = resolveFfmpeg();
+  console.log(`FFmpeg status: ${resolvedFfmpegPath ? `AVAILABLE at ${resolvedFfmpegPath}` : "NOT FOUND (separate audio/video muxing will use available fallbacks)"}`);
+
   try {
-    if (fs.existsSync(ytDlpPath)) {
+    const existing = findExistingYtDlp();
+    if (existing) {
+      ytDlpPath = existing;
       const stats = fs.statSync(ytDlpPath);
-      // Treat anything under 1MB as a partial/corrupt download
-      if (stats.size < 1_000_000) {
-        console.warn(`Local yt-dlp binary is too small (${stats.size} bytes — likely partial). Deleting and re-downloading...`);
-        try { fs.unlinkSync(ytDlpPath); } catch (_) {}
-        await downloadYtDlp();
-      } else {
-        console.log(`yt-dlp is already available locally at: ${ytDlpPath} (${stats.size} bytes)`);
-      }
+      console.log(`yt-dlp is available at: ${ytDlpPath} (${stats.size} bytes)`);
       isYtDlpAvailable = true;
-    } else {
-      await downloadYtDlp();
-      isYtDlpAvailable = true;
+      return;
     }
+
+    console.log(`No existing yt-dlp binary found. Downloading to: ${ytDlpPath}...`);
+    await downloadYtDlp();
+    isYtDlpAvailable = true;
   } catch (error: any) {
     console.error("Failed to initialize yt-dlp binary:", error.message);
     isYtDlpAvailable = false;
@@ -400,11 +474,11 @@ function normalizeMediaUrl(inputUrl: string): string {
   try {
     let clean = inputUrl.trim();
     // Expand YouTube shortlinks (youtu.be/ID?si=...) to canonical URLs
-    const ytShortMatch = clean.match(/youtu\.be\/([a-zA-Z0-9_-]+)/);
+    const ytShortMatch = clean.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
     if (ytShortMatch) {
       return `https://www.youtube.com/watch?v=${ytShortMatch[1]}`;
     }
-    const ytLongMatch = clean.match(/(?:youtube\.com\/watch\?.*v=|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]+)/);
+    const ytLongMatch = clean.match(/(?:youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/);
     if (ytLongMatch) {
       return `https://www.youtube.com/watch?v=${ytLongMatch[1]}`;
     }
@@ -549,20 +623,21 @@ function getMediaInfo(rawUrl: string): Promise<any> {
       console.log("Using Twitter session cookie from TWITTER_AUTH_TOKEN env variable");
     }
 
-    const isYoutube = /youtube\.com|youtu\.be/.test(url);
     const isTiktok = /tiktok\.com/.test(url);
 
     args.push(
-      "--dump-single-json",
+      "-J",
       "--no-playlist",
-      "--ignore-errors",
+      "--skip-download",
       "--no-check-certificate",
       "--no-warnings"
     );
 
-    if (isYoutube) {
-      args.push("--extractor-args", "youtube:player_client=android,web");
+    if (resolvedFfmpegPath) {
+      args.push("--ffmpeg-location", resolvedFfmpegPath);
     }
+
+    args.push("--js-runtimes", "node");
 
     if (isTiktok) {
       args.push("--extractor-args", "tiktok:api_hostname=api16-normal-c-useast1a.tiktokv.com");
@@ -589,23 +664,25 @@ function getMediaInfo(rawUrl: string): Promise<any> {
     });
 
     proc.on("close", (code) => {
+      if (stdout.trim()) {
+        try {
+          const info = JSON.parse(stdout);
+          return resolve(info);
+        } catch (_) {}
+      }
+
       if (code !== 0) {
         console.error("yt-dlp stderr:", stderr.substring(0, 500));
         reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`));
         return;
       }
 
-      try {
-        const info = JSON.parse(stdout);
-        resolve(info);
-      } catch (err: any) {
-        reject(new Error("Failed to parse yt-dlp metadata JSON: " + err.message));
-      }
+      reject(new Error("No metadata returned by yt-dlp"));
     });
   });
 }
 
-// Reusable media pipe using yt-dlp (with H.264/AAC browser-compatible streaming)
+// Reusable media pipe / downloader using yt-dlp (with H.264/AAC browser-compatible streaming)
 function pipeYtDlpMedia(
   src: string,
   req: express.Request,
@@ -619,37 +696,55 @@ function pipeYtDlpMedia(
 ) {
   if (!isYtDlpAvailable) {
     if (!res.headersSent) {
-      res.status(503).send("yt-dlp not available for direct media streaming");
+      res.status(503).json({ error: "Downloader service currently initializing. Please try again shortly." });
     }
     return;
   }
 
   const isDownload = options.isDownload || false;
   const isAudio = options.isAudio || false;
-  const targetHeight = options.targetHeight || 720;
+  const targetHeight = options.targetHeight || 1080;
   const safeFilename = options.safeFilename || (isAudio ? "audio.mp3" : "video.mp4");
-
-  // Single pre-muxed format selector prioritizing universal H.264/AVC1 for video & AAC/MP3 for audio
-  const formatStr = isAudio
-    ? "bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio/ba"
-    : `best[vcodec^=avc1][height<=${targetHeight}][ext=mp4]/best[vcodec^=h264][height<=${targetHeight}][ext=mp4]/best[height<=${targetHeight}][ext=mp4]/best[vcodec^=avc1][ext=mp4]/best[vcodec^=h264][ext=mp4]/best[ext=mp4]/best/b`;
-
-  const isYoutube = /youtube\.com|youtu\.be/.test(src);
   const isTiktok = /tiktok\.com/.test(src);
+
+  // Intelligent format selector:
+  // Video: prioritize universal H.264 (AVC1) for video & AAC (m4a) for audio up to targetHeight,
+  // then fallback to general video+audio merge, then pre-muxed, then best.
+  // Audio: prioritize native MP3/M4A, or convert to MP3 via ffmpeg if available.
+  const formatStr = isAudio
+    ? "ba[ext=mp3]/ba[ext=m4a]/ba[acodec^=mp4a]/ba/b"
+    : `bv*[height<=${targetHeight}][vcodec^=avc1]+ba[acodec^=mp4a]/bv*[height<=${targetHeight}][vcodec^=avc]+ba[ext=m4a]/bv*[height<=${targetHeight}][ext=mp4]+ba[ext=m4a]/bv*[height<=${targetHeight}]+ba/b[height<=${targetHeight}]/bv*+ba/b`;
+
+  const contentType = isAudio ? "audio/mpeg" : "video/mp4";
+  const disposition = isDownload
+    ? `attachment; filename="${encodeURIComponent(safeFilename)}"`
+    : `inline; filename="${encodeURIComponent(safeFilename)}"`;
+
+  // Download and merge to a temporary file, then stream with Range support and auto-cleanup
+  const tempFile = path.join(
+    os.tmpdir(),
+    `quicksave_${Date.now()}_${Math.random().toString(36).slice(2)}.${isAudio ? "mp3" : "mp4"}`
+  );
 
   const args: string[] = [
     "-4",
     "--no-playlist",
     "--no-check-certificate",
     "--no-warnings",
-    "--ignore-errors",
     "-f", formatStr,
-    "-o", "-",
   ];
 
-  if (isYoutube) {
-    args.push("--extractor-args", "youtube:player_client=web,android");
+  if (isAudio && resolvedFfmpegPath) {
+    args.push("-x", "--audio-format", "mp3");
+  } else if (!isAudio) {
+    args.push("--merge-output-format", "mp4");
   }
+
+  if (resolvedFfmpegPath) {
+    args.push("--ffmpeg-location", resolvedFfmpegPath);
+  }
+
+  args.push("--js-runtimes", "node");
 
   if (isTiktok) {
     args.push("--extractor-args", "tiktok:api_hostname=api16-normal-c-useast1a.tiktokv.com");
@@ -665,63 +760,105 @@ function pipeYtDlpMedia(
     args.push("--cookies", twitterCookieFile);
   }
 
+  args.push("-o", tempFile);
   args.push(src);
 
-  console.log(`[Preview] yt-dlp media streaming pipe (${isAudio ? "audio" : `video@${targetHeight}p`}) for: ${src.substring(0, 60)}...`);
+  console.log(`[Media Pipe] Starting download for: ${src.substring(0, 60)} (${isAudio ? "Audio MP3" : `${targetHeight}p MP4`}) -> ${tempFile}`);
+
   const proc = spawn(ytDlpPath, args, { windowsHide: true });
-
-  let dataStarted = false;
-
-  proc.stdout.on("data", (chunk: Buffer) => {
-    if (!dataStarted) {
-      dataStarted = true;
-      const contentType = isAudio ? "audio/mpeg" : "video/mp4";
-      const disposition = isDownload
-        ? `attachment; filename="${safeFilename}"`
-        : `inline; filename="${safeFilename}"`;
-      res.writeHead(200, {
-        "Content-Type": contentType,
-        "Content-Disposition": disposition,
-        "Accept-Ranges": "bytes",
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "no-store",
-        "Transfer-Encoding": "chunked",
-        "X-Content-Type-Options": "nosniff",
-      });
-    }
-    res.write(chunk);
-  });
-
-  proc.stdout.on("end", () => {
-    if (!dataStarted && !res.headersSent) {
-      res.status(502).send("yt-dlp produced no media output. The URL may be unavailable or geo-blocked.");
-    } else {
-      res.end();
-    }
-  });
+  let stderr = "";
 
   proc.stderr.on("data", (data: Buffer) => {
-    const msg = data.toString();
-    if (!msg.startsWith("[download]") && !msg.startsWith("[info]") && !msg.startsWith("[youtube]")) {
-      console.warn("[Preview] yt-dlp stderr:", msg.substring(0, 250));
-    }
+    stderr += data.toString();
   });
 
-  proc.on("error", (err: Error) => {
-    console.error("[Preview] yt-dlp spawn error:", err);
-    if (!res.headersSent) {
-      res.status(500).send("Failed to start yt-dlp media process");
+  // Client abort handling
+  const cleanup = () => {
+    if (!proc.killed) {
+      try { proc.kill("SIGTERM"); } catch (_) {}
+    }
+    if (fs.existsSync(tempFile)) {
+      try { fs.unlinkSync(tempFile); } catch (_) {}
+    }
+  };
+
+  req.on("close", () => {
+    if (!res.writableEnded) {
+      console.log(`[Media Pipe] Client disconnected prematurely for: ${src.substring(0, 50)}`);
+      cleanup();
     }
   });
 
   proc.on("close", (code: number | null) => {
-    console.log(`[Preview] yt-dlp stream pipe exited with code ${code}`);
-    if (!res.writableEnded) res.end();
-  });
+    if (code !== 0 || !fs.existsSync(tempFile)) {
+      console.error(`[Media Pipe] yt-dlp exited with code ${code}. Stderr: ${stderr.substring(0, 400)}`);
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: "Media processing failed",
+          details: "Unable to download or process media from the upstream provider. Please try another quality."
+        });
+      }
+      cleanup();
+      return;
+    }
 
-  res.on("close", () => {
-    if (!proc.killed) {
-      proc.kill("SIGTERM");
+    try {
+      const stats = fs.statSync(tempFile);
+      const totalSize = stats.size;
+
+      if (totalSize === 0) {
+        if (!res.headersSent) {
+          res.status(502).json({ error: "Empty media produced", details: "Upstream media stream was empty." });
+        }
+        cleanup();
+        return;
+      }
+
+      console.log(`[Media Pipe] Download & merge completed: ${totalSize} bytes. Streaming to client...`);
+
+      // Support HTTP Range Requests (seekable preview and download resume)
+      const range = req.headers.range;
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+        const chunkSize = end - start + 1;
+
+        res.writeHead(206, {
+          "Content-Range": `bytes ${start}-${end}/${totalSize}`,
+          "Accept-Ranges": "bytes",
+          "Content-Length": chunkSize,
+          "Content-Type": contentType,
+          "Content-Disposition": disposition,
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600",
+        });
+
+        const fileStream = fs.createReadStream(tempFile, { start, end });
+        fileStream.pipe(res);
+        fileStream.on("close", () => {
+          setTimeout(cleanup, 5000);
+        });
+      } else {
+        res.writeHead(200, {
+          "Content-Length": totalSize,
+          "Content-Type": contentType,
+          "Content-Disposition": disposition,
+          "Accept-Ranges": "bytes",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600",
+        });
+
+        const fileStream = fs.createReadStream(tempFile);
+        fileStream.pipe(res);
+        fileStream.on("close", cleanup);
+      }
+    } catch (e: any) {
+      console.error("[Media Pipe] Error serving file:", e.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to stream media file", details: e.message });
+      }
+      cleanup();
     }
   });
 }
@@ -781,6 +918,57 @@ async function startServer() {
           return res.json(tiktokResult);
         } catch (ttErr: any) {
           console.warn("Direct TikTok extraction failed, falling back to Cobalt/yt-dlp:", ttErr.message);
+        }
+      }
+
+      // ── Specialized Strategy 1: Dedicated YouTube Pipeline via yt-dlp ──────────────
+      if (platform === "youtube") {
+        try {
+          console.log(`Extracting YouTube media metadata via yt-dlp for: ${url}...`);
+          const info = await getMediaInfo(url);
+          if (info) {
+            const rawTitle = info.title || "YouTube Video";
+            const cleanTitle = rawTitle
+              .replace(/[/\\?%*:|"<>]/g, "_")
+              .replace(/\s+/g, "_")
+              .substring(0, 80) || "youtube_video";
+
+            const isAudio = downloadMode === "audio";
+            const targetHeight = parseInt(videoQuality as string) || 1080;
+            const ext = isAudio ? "mp3" : "mp4";
+            const safeFilename = `${cleanTitle}.${ext}`;
+
+            let thumb = info.thumbnail || info.thumbnails?.[0]?.url || "";
+            const ytMatch = url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+            if (!thumb && ytMatch) {
+              thumb = `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`;
+            }
+
+            const mediaUrl = `/api/media?src=${encodeURIComponent(url)}&quality=${targetHeight}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
+            const fallbackMediaUrl = `/api/media?src=${encodeURIComponent(url)}&quality=720&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
+
+            console.log(`YouTube extraction successful: "${rawTitle}" -> ${mediaUrl}`);
+
+            return res.json({
+              status: "stream",
+              url: mediaUrl,
+              previewUrl: mediaUrl,
+              fallbackUrl: fallbackMediaUrl,
+              title: rawTitle,
+              thumb,
+              filename: safeFilename,
+            });
+          }
+        } catch (ytErr: any) {
+          console.error("YouTube yt-dlp extraction error:", ytErr.message);
+          return res.status(422).json({
+            error: "YouTube extraction failed",
+            details: ytErr.message?.includes("Private video")
+              ? "This video is private or restricted."
+              : ytErr.message?.includes("Sign in")
+              ? "YouTube requested bot verification for this video."
+              : "Unable to extract media from this YouTube URL. Please verify the link and try again.",
+          });
         }
       }
 
@@ -1048,16 +1236,31 @@ async function startServer() {
       }
 
       if (platform === "twitter") {
-        throw new Error("Unable to extract media from this Twitter/X post. Please verify that the post contains a video or GIF. (If the post is sensitive/age-restricted, Twitter/X may require authentication cookies).");
+        return res.status(422).json({
+          error: "Twitter/X extraction failed",
+          details: "Unable to extract media from this Twitter/X post. Please verify that the post contains a video or GIF."
+        });
       } else if (platform === "tiktok") {
-        throw new Error("Unable to extract media from this TikTok URL. Please verify the link and try again.");
+        return res.status(422).json({
+          error: "TikTok extraction failed",
+          details: "Unable to extract media from this TikTok URL. Please verify the link and try again."
+        });
+      } else if (platform === "youtube") {
+        return res.status(422).json({
+          error: "YouTube extraction failed",
+          details: "No compatible media stream was found for this YouTube link. Please verify the URL."
+        });
       } else {
-        throw new Error("Unable to extract direct media stream. Please verify the URL and try again.");
+        return res.status(422).json({
+          error: "Media extraction failed",
+          details: "Unable to extract media stream from the provided URL. Please verify the link and try again."
+        });
       }
     } catch (error: any) {
       console.error("Download route error:", error);
       return res.status(500).json({
-        error: error.message || "An error occurred while communicating with downloader services.",
+        error: "Media extraction error",
+        details: error.message || "An unexpected error occurred while communicating with downloader services.",
       });
     }
   });
@@ -1076,7 +1279,7 @@ async function startServer() {
 
     const isDownload = dl === "1" || dl === "true";
     const isAudio = mode === "audio";
-    const targetHeight = parseInt(quality as string) || 720;
+    const targetHeight = parseInt(quality as string) || 1080;
     const safeFilename = (filename as string) || (isAudio ? "audio.mp3" : "video.mp4");
 
     pipeYtDlpMedia(src, req, res, {

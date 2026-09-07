@@ -22,20 +22,22 @@ FROM node:22-slim AS runner
 
 WORKDIR /app
 
-# Install curl for yt-dlp download + ca-certificates + ffmpeg
+# Install curl for yt-dlp download + ca-certificates + ffmpeg + python3
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     ffmpeg \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Download yt-dlp Linux binary and bake it into the image
-# This means zero runtime download delay — yt-dlp is always ready
+# Provide both /app/bin/yt-dlp and /app/bin/yt-dlp_linux symlink
 RUN mkdir -p /app/bin && \
     curl -L --retry 5 --retry-delay 3 \
       -o /app/bin/yt-dlp \
       "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux" && \
-    chmod +x /app/bin/yt-dlp
+    chmod +x /app/bin/yt-dlp && \
+    ln -sf /app/bin/yt-dlp /app/bin/yt-dlp_linux
 
 # Copy built output from builder stage
 COPY --from=builder /app/dist ./dist
