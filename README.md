@@ -1,11 +1,12 @@
 # QuickSave Web
 
-QuickSave Web is a modern online media downloader that enables users to quickly download videos and images from platforms such as TikTok, X (Twitter), Instagram, and other supported services.
+QuickSave Web is a modern online media downloader that allows users to quickly download videos, images, and audio from platforms such as TikTok, YouTube, Instagram, and X (Twitter).
 
 ## Features
 
 - Fast media downloads
 - High-quality output
+- Video, image, and audio support
 - Clean and responsive interface
 - Easy-to-use experience
 - Cross-platform compatibility
@@ -15,10 +16,3 @@ QuickSave Web is a modern online media downloader that enables users to quickly 
 ```bash
 npm install
 npm run dev
-```
-
-## Built With
-
-- React
-- TypeScript
-- Vite
