@@ -1154,6 +1154,50 @@ function getAiClient(): GoogleGenAI {
     res.json(result);
   });
 
+  // Test individual player clients on the server
+  app.get("/api/test-client", async (req, res) => {
+    const client = (req.query.client as string) || "web";
+    const targetUrl = (req.query.url as string) || "https://youtu.be/-H_I2T7yWQM";
+    const normUrl = normalizeMediaUrl(targetUrl);
+    const args = [
+      "-4",
+      "-J",
+      "--no-playlist",
+      "--skip-download",
+      "--no-check-certificate",
+      "--no-warnings",
+      "--socket-timeout", "10",
+    ];
+    if (client !== "none") {
+      args.push("--extractor-args", `youtube:player_client=${client}`);
+    }
+    args.push(normUrl);
+
+    const start = Date.now();
+    try {
+      const proc = spawn(ytDlpPath, args, { windowsHide: true });
+      let stdout = "";
+      let stderr = "";
+      proc.stdout.on("data", (d: Buffer) => stdout += d.toString());
+      proc.stderr.on("data", (d: Buffer) => stderr += d.toString());
+      const code = await new Promise<number | null>((resolve) => proc.on("close", resolve));
+      let parsed: any = null;
+      try { parsed = JSON.parse(stdout); } catch (_) {}
+      res.json({
+        durationMs: Date.now() - start,
+        code,
+        client,
+        stdoutLength: stdout.length,
+        hasTitle: Boolean(parsed?.title),
+        title: parsed?.title,
+        formatsCount: parsed?.formats?.length,
+        stderr: stderr.trim()
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message, durationMs: Date.now() - start });
+    }
+  });
+
   // API Route: Fast Media Extraction & Download (Sub-second response pipeline)
   app.post("/api/download", async (req, res) => {
     const { url: rawUrl, videoQuality, downloadMode, audioFormat } = req.body;
