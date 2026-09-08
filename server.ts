@@ -1099,8 +1099,12 @@ function getAiClient(): GoogleGenAI {
         result.testResult = {
           success: true,
           durationMs: Date.now() - t0,
-          title: info?.title,
-          formatsCount: info?.formats?.length,
+          type: typeof info,
+          keys: info ? Object.keys(info).slice(0, 15) : null,
+          title: info?.title ?? null,
+          formatsCount: info?.formats?.length ?? null,
+          extractor: info?.extractor ?? null,
+          sample: JSON.stringify(info).substring(0, 300),
         };
       } catch (e: any) {
         result.testResult = {
@@ -1116,6 +1120,7 @@ function getAiClient(): GoogleGenAI {
   // API Route: Fast Media Extraction & Download (Sub-second response pipeline)
   app.post("/api/download", async (req, res) => {
     const { url: rawUrl, videoQuality, downloadMode, audioFormat } = req.body;
+    let lastExtractionError: string | null = null;
     try {
       if (!rawUrl) {
         return res.status(400).json({ error: "Missing required field: url" });
@@ -1240,6 +1245,7 @@ function getAiClient(): GoogleGenAI {
               });
             }
           } catch (ytErr: any) {
+            lastExtractionError = ytErr.message || String(ytErr);
             const errCategory = ytErr.message?.includes("Sign in")
               ? "BOT_VERIFICATION"
               : ytErr.message?.includes("Private video")
@@ -1533,7 +1539,7 @@ function getAiClient(): GoogleGenAI {
       } else if (platform === "youtube") {
         return res.status(422).json({
           error: "YouTube extraction failed",
-          details: "No compatible media stream was found for this YouTube link. Please verify the URL."
+          details: lastExtractionError || "No compatible media stream was found for this YouTube link. Please verify the URL."
         });
       } else {
         return res.status(422).json({
