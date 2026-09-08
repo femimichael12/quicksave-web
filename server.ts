@@ -375,7 +375,7 @@ async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "yo
       });
 
       req.on("error", reject);
-      req.setTimeout(5000, () => {
+      req.setTimeout(2500, () => {
         req.destroy();
         reject(new Error("Timeout fetching cobalt instances list"));
       });
@@ -683,8 +683,43 @@ interface StreamContext {
 
 const streamContextCache = new Map<string, StreamContext>();
 
-// Query media info with yt-dlp
-function getMediaInfo(rawUrl: string): Promise<any> {
+// In-Memory LRU/TTL Cache for media metadata (15-minute TTL)
+interface CachedMediaInfo {
+  info: any;
+  timestamp: number;
+}
+
+const mediaInfoCache = new Map<string, CachedMediaInfo>();
+const MEDIA_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
+function getMediaCacheKey(rawUrl: string): string {
+  const url = normalizeMediaUrl(rawUrl);
+  const ytMatch = url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  if (ytMatch) {
+    return `yt_${ytMatch[1]}`;
+  }
+  const ttMatch = url.match(/video\/(\d+)/);
+  if (ttMatch) {
+    return `tt_${ttMatch[1]}`;
+  }
+  const twMatch = url.match(/status\/(\d+)/);
+  if (twMatch) {
+    return `tw_${twMatch[1]}`;
+  }
+  return url;
+}
+
+// Query media info with yt-dlp (with in-memory cache and mobile client args)
+function getMediaInfo(rawUrl: string, bypassCache = false): Promise<any> {
+  const cacheKey = getMediaCacheKey(rawUrl);
+  if (!bypassCache) {
+    const cached = mediaInfoCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < MEDIA_CACHE_TTL)) {
+      console.log(`[Media Cache] HIT for ${cacheKey} (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
+      return Promise.resolve(cached.info);
+    }
+  }
+
   return new Promise((resolve, reject) => {
     if (!isYtDlpAvailable) {
       reject(new Error("yt-dlp binary is currently not available."));
@@ -707,14 +742,26 @@ function getMediaInfo(rawUrl: string): Promise<any> {
       console.log("Using Twitter session cookie from TWITTER_AUTH_TOKEN env variable");
     }
 
+    const ytCookieFile = getYouTubeCookieFile();
+    if (ytCookieFile && (/youtube\.com|youtu\.be/.test(url))) {
+      args.push("--cookies", ytCookieFile);
+    }
+
+    const ytProxy = process.env.YOUTUBE_PROXY || process.env.HTTP_PROXY;
+    if (ytProxy && (/youtube\.com|youtu\.be/.test(url))) {
+      args.push("--proxy", ytProxy);
+    }
+
     const isTiktok = /tiktok\.com/.test(url);
+    const isYoutube = /youtube\.com|youtu\.be/.test(url);
 
     args.push(
       "-J",
       "--no-playlist",
       "--skip-download",
       "--no-check-certificate",
-      "--no-warnings"
+      "--no-warnings",
+      "--socket-timeout", "8"
     );
 
     if (resolvedFfmpegPath) {
@@ -725,6 +772,10 @@ function getMediaInfo(rawUrl: string): Promise<any> {
 
     if (isTiktok) {
       args.push("--extractor-args", "tiktok:api_hostname=api16-normal-c-useast1a.tiktokv.com");
+    }
+
+    if (isYoutube) {
+      args.push("--extractor-args", "youtube:player_client=android,web");
     }
 
     args.push(url);
@@ -751,6 +802,15 @@ function getMediaInfo(rawUrl: string): Promise<any> {
       if (stdout.trim()) {
         try {
           const info = JSON.parse(stdout);
+          mediaInfoCache.set(cacheKey, { info, timestamp: Date.now() });
+          if (mediaInfoCache.size > 200) {
+            const now = Date.now();
+            for (const [k, v] of mediaInfoCache.entries()) {
+              if (now - v.timestamp > MEDIA_CACHE_TTL) {
+                mediaInfoCache.delete(k);
+              }
+            }
+          }
           return resolve(info);
         } catch (_) {}
       }
@@ -790,6 +850,7 @@ function pipeYtDlpMedia(
   const targetHeight = options.targetHeight || 1080;
   const safeFilename = options.safeFilename || (isAudio ? "audio.mp3" : "video.mp4");
   const isTiktok = /tiktok\.com/.test(src);
+  const isYoutube = /youtube\.com|youtu\.be/.test(src);
 
   // Intelligent format selector:
   // Video: prioritize universal H.264 (AVC1) for video & AAC (m4a) for audio up to targetHeight,
@@ -822,6 +883,7 @@ function pipeYtDlpMedia(
     "--no-playlist",
     "--no-check-certificate",
     "--no-warnings",
+    "--socket-timeout", "15",
     "-f", formatStr,
   ];
 
@@ -839,6 +901,10 @@ function pipeYtDlpMedia(
 
   if (isTiktok) {
     args.push("--extractor-args", "tiktok:api_hostname=api16-normal-c-useast1a.tiktokv.com");
+  }
+
+  if (isYoutube) {
+    args.push("--extractor-args", "youtube:player_client=android,web");
   }
 
   const igCookieFile = getInstagramCookieFile();
@@ -1028,8 +1094,11 @@ function getAiClient(): GoogleGenAI {
         }
       }
 
+      let ytDlpAlreadyAttempted = false;
+
       // ── Specialized Strategy 1: Dedicated YouTube Pipeline via yt-dlp ──────────────
       if (platform === "youtube") {
+        ytDlpAlreadyAttempted = true;
         let ytDlpSuccess = false;
         if (isYtDlpAvailable) {
           try {
@@ -1057,7 +1126,7 @@ function getAiClient(): GoogleGenAI {
               let directCdnStreamUrl: string | null = null;
               if (Array.isArray(info.formats)) {
                 if (isAudio) {
-                  const audioFmt = info.formats.find((f: any) => f.vcodec === "none" && f.acodec !== "none" && f.url && f.ext === "m4a")
+                  const audioFmt = info.formats.find((f: any) => f.vcodec === "none" && f.acodec !== "none" && f.url && (f.ext === "m4a" || f.ext === "mp3" || (f.acodec && f.acodec.includes("mp4a"))))
                     || info.formats.find((f: any) => f.vcodec === "none" && f.acodec !== "none" && f.url);
                   if (audioFmt?.url) {
                     directCdnStreamUrl = audioFmt.url;
@@ -1075,14 +1144,25 @@ function getAiClient(): GoogleGenAI {
                 }
               }
 
-              // In Vercel serverless, if direct CDN stream is available, route via /api/stream to avoid 10s timeout
-              const useDirectProxy = Boolean(process.env.VERCEL && directCdnStreamUrl);
+              // Direct CDN streaming: stream immediately with Range support and zero server disk bottleneck
+              const useDirectProxy = Boolean(directCdnStreamUrl);
               const proxyUrl = directCdnStreamUrl
                 ? `/api/stream?url=${encodeURIComponent(directCdnStreamUrl)}&filename=${encodeURIComponent(safeFilename)}&src=${encodeURIComponent(url)}`
                 : `/api/media?src=${encodeURIComponent(url)}&quality=${targetHeight}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
 
               const mediaPipeUrl = `/api/media?src=${encodeURIComponent(url)}&quality=${targetHeight}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
               const fallbackMediaUrl = `/api/media?src=${encodeURIComponent(url)}&quality=720&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
+
+              // Cache stream headers and cookies for proxy streaming
+              const mediaCookies = info.cookies || "";
+              const mediaHeaders = info.http_headers || {};
+              const contextItem: StreamContext = {
+                headers: mediaHeaders,
+                cookies: mediaCookies,
+                timestamp: Date.now(),
+              };
+              if (url) streamContextCache.set(url, contextItem);
+              if (directCdnStreamUrl) streamContextCache.set(directCdnStreamUrl, contextItem);
 
               console.log(`[Extractor Diagnostic] YouTube yt-dlp SUCCESS: "${rawTitle}" (Direct Stream: ${directCdnStreamUrl ? "YES" : "NO"})`);
               ytDlpSuccess = true;
@@ -1276,7 +1356,7 @@ function getAiClient(): GoogleGenAI {
       }
 
       // ── Strategy 2: Fast yt-dlp Direct CDN URL Extraction Fallback ───────────
-      if (isYtDlpAvailable) {
+      if (isYtDlpAvailable && !ytDlpAlreadyAttempted) {
         try {
           const info = await getMediaInfo(url);
           if (info) {
