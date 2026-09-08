@@ -799,29 +799,32 @@ function getMediaInfo(rawUrl: string, bypassCache = false): Promise<any> {
     });
 
     proc.on("close", (code) => {
-      if (stdout.trim()) {
+      const trimmed = stdout.trim();
+      if (trimmed && trimmed !== "null") {
         try {
-          const info = JSON.parse(stdout);
-          mediaInfoCache.set(cacheKey, { info, timestamp: Date.now() });
-          if (mediaInfoCache.size > 200) {
-            const now = Date.now();
-            for (const [k, v] of mediaInfoCache.entries()) {
-              if (now - v.timestamp > MEDIA_CACHE_TTL) {
-                mediaInfoCache.delete(k);
+          const info = JSON.parse(trimmed);
+          if (info && typeof info === "object" && (info.title || info.formats || info.entries)) {
+            mediaInfoCache.set(cacheKey, { info, timestamp: Date.now() });
+            if (mediaInfoCache.size > 200) {
+              const now = Date.now();
+              for (const [k, v] of mediaInfoCache.entries()) {
+                if (now - v.timestamp > MEDIA_CACHE_TTL) {
+                  mediaInfoCache.delete(k);
+                }
               }
             }
+            return resolve(info);
           }
-          return resolve(info);
         } catch (_) {}
       }
 
-      if (code !== 0) {
+      if (code !== 0 || !trimmed || trimmed === "null") {
         console.error("yt-dlp stderr:", stderr.substring(0, 500));
-        reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`));
+        reject(new Error(stderr.trim() || `yt-dlp exited with code ${code} (output: ${trimmed.substring(0, 60)})`));
         return;
       }
 
-      reject(new Error("No metadata returned by yt-dlp"));
+      reject(new Error("No valid metadata returned by yt-dlp"));
     });
   });
 }
@@ -1093,6 +1096,40 @@ function getAiClient(): GoogleGenAI {
     }
 
     if (req.query.test === "1" || req.query.test === "true") {
+      const rawStart = Date.now();
+      const normUrl = normalizeMediaUrl(testUrl);
+      const testArgs = [
+        "-4",
+        "-J",
+        "--no-playlist",
+        "--skip-download",
+        "--no-check-certificate",
+        "--no-warnings",
+        "--socket-timeout", "8",
+        "--extractor-args", "youtube:player_client=android,web",
+        normUrl
+      ];
+
+      try {
+        const rawProc = spawn(ytDlpPath, testArgs, { windowsHide: true });
+        let rawOut = "";
+        let rawErr = "";
+        rawProc.stdout.on("data", (d: Buffer) => rawOut += d.toString());
+        rawProc.stderr.on("data", (d: Buffer) => rawErr += d.toString());
+        const code = await new Promise<number | null>((resolve) => rawProc.on("close", resolve));
+        result.rawRun = {
+          durationMs: Date.now() - rawStart,
+          code,
+          normUrl,
+          args: testArgs,
+          stdoutLength: rawOut.length,
+          stdoutSample: rawOut.substring(0, 300),
+          stderr: rawErr.substring(0, 1000),
+        };
+      } catch (err: any) {
+        result.rawRun = { error: err.message };
+      }
+
       try {
         const t0 = Date.now();
         const info = await getMediaInfo(testUrl, true);
