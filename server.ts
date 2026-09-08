@@ -1158,19 +1158,45 @@ function getAiClient(): GoogleGenAI {
   app.get("/api/test-client", async (req, res) => {
     const client = (req.query.client as string) || "web";
     const targetUrl = (req.query.url as string) || "https://youtu.be/-H_I2T7yWQM";
+    const verbose = req.query.verbose === "1" || req.query.verbose === "true";
+    const extraArgs = (req.query.extra_args as string) || "";
+    const cookie = (req.query.cookie as string) || "";
     const normUrl = normalizeMediaUrl(targetUrl);
     const args = [
       "-4",
-      "-J",
       "--no-playlist",
       "--skip-download",
       "--no-check-certificate",
       "--no-warnings",
       "--socket-timeout", "10",
     ];
+
+    if (verbose) {
+      args.push("-v");
+    } else {
+      args.push("-J");
+    }
+
     if (client !== "none") {
       args.push("--extractor-args", `youtube:player_client=${client}`);
     }
+
+    if (extraArgs) {
+      args.push(...extraArgs.split(" ").filter(Boolean));
+    }
+
+    let tempCookiePath: string | null = null;
+    if (cookie) {
+      tempCookiePath = path.join(os.tmpdir(), `test_cookie_${Date.now()}.txt`);
+      fs.writeFileSync(tempCookiePath, cookie, "utf8");
+      args.push("--cookies", tempCookiePath);
+    } else {
+      const ytCookieFile = getYouTubeCookieFile();
+      if (ytCookieFile) {
+        args.push("--cookies", ytCookieFile);
+      }
+    }
+
     args.push(normUrl);
 
     const start = Date.now();
@@ -1181,16 +1207,21 @@ function getAiClient(): GoogleGenAI {
       proc.stdout.on("data", (d: Buffer) => stdout += d.toString());
       proc.stderr.on("data", (d: Buffer) => stderr += d.toString());
       const code = await new Promise<number | null>((resolve) => proc.on("close", resolve));
+      if (tempCookiePath && fs.existsSync(tempCookiePath)) {
+        try { fs.unlinkSync(tempCookiePath); } catch (_) {}
+      }
       let parsed: any = null;
       try { parsed = JSON.parse(stdout); } catch (_) {}
       res.json({
         durationMs: Date.now() - start,
         code,
         client,
+        args,
         stdoutLength: stdout.length,
         hasTitle: Boolean(parsed?.title),
         title: parsed?.title,
         formatsCount: parsed?.formats?.length,
+        stdoutSample: stdout.substring(0, 500),
         stderr: stderr.trim()
       });
     } catch (e: any) {
