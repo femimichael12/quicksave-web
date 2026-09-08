@@ -1051,6 +1051,68 @@ function getAiClient(): GoogleGenAI {
     return aiClient;
   }
 
+  // Diagnostic endpoint to inspect runtime environment, binaries, and test execution
+  app.get("/api/diagnostic", async (req, res) => {
+    const testUrl = (req.query.url as string) || "https://youtu.be/-H_I2T7yWQM";
+    const result: any = {
+      timestamp: new Date().toISOString(),
+      platform: os.platform(),
+      arch: os.arch(),
+      isYtDlpAvailable,
+      ytDlpPath,
+      resolvedFfmpegPath,
+      cacheSize: mediaInfoCache.size,
+      env: {
+        NODE_ENV: process.env.NODE_ENV,
+        VERCEL: process.env.VERCEL,
+        PORT: process.env.PORT,
+        YOUTUBE_PROXY: Boolean(process.env.YOUTUBE_PROXY),
+      },
+    };
+
+    try {
+      result.binaryExists = fs.existsSync(ytDlpPath);
+      result.binarySize = result.binaryExists ? fs.statSync(ytDlpPath).size : null;
+    } catch (e: any) {
+      result.binaryStatError = e.message;
+    }
+
+    try {
+      const versionOutput = await new Promise<string>((resolve, reject) => {
+        const proc = spawn(ytDlpPath, ["--version"]);
+        let out = "";
+        let err = "";
+        proc.stdout.on("data", (d: Buffer) => out += d);
+        proc.stderr.on("data", (d: Buffer) => err += d);
+        proc.on("close", (code: number | null) => code === 0 ? resolve(out.trim()) : reject(new Error(err || `code ${code}`)));
+        proc.on("error", reject);
+      });
+      result.ytDlpVersion = versionOutput;
+    } catch (e: any) {
+      result.versionError = e.message;
+    }
+
+    if (req.query.test === "1" || req.query.test === "true") {
+      try {
+        const t0 = Date.now();
+        const info = await getMediaInfo(testUrl, true);
+        result.testResult = {
+          success: true,
+          durationMs: Date.now() - t0,
+          title: info?.title,
+          formatsCount: info?.formats?.length,
+        };
+      } catch (e: any) {
+        result.testResult = {
+          success: false,
+          error: e.message,
+        };
+      }
+    }
+
+    res.json(result);
+  });
+
   // API Route: Fast Media Extraction & Download (Sub-second response pipeline)
   app.post("/api/download", async (req, res) => {
     const { url: rawUrl, videoQuality, downloadMode, audioFormat } = req.body;
