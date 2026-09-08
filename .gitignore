@@ -2,7 +2,8 @@ node_modules/
 build/
 dist/
 coverage/
-bin/
+bin/*.exe
+!bin/yt-dlp_linux
 .DS_Store
 *.log
 .env*

@@ -42,10 +42,36 @@ import http from "http";
 import os from "os";
 
 
-// Binary paths
-const binDir = path.join(process.cwd(), "bin");
+// Binary paths & environment detection
 const platform = os.platform();
 const arch = os.arch();
+
+// Dynamic bin directory discovery: writable local folder or /tmp/bin in serverless (Vercel)
+function getBinDir(): string {
+  const localBin = path.join(process.cwd(), "bin");
+  try {
+    if (!fs.existsSync(localBin)) {
+      fs.mkdirSync(localBin, { recursive: true });
+    }
+    const testFile = path.join(localBin, `.write_test_${process.pid}`);
+    fs.writeFileSync(testFile, "ok");
+    fs.unlinkSync(testFile);
+    return localBin;
+  } catch (_) {
+    // Read-only filesystem (Vercel Serverless / AWS Lambda)
+    const tmpBin = path.join(os.tmpdir(), "bin");
+    try {
+      if (!fs.existsSync(tmpBin)) {
+        fs.mkdirSync(tmpBin, { recursive: true });
+      }
+      return tmpBin;
+    } catch (_) {
+      return os.tmpdir();
+    }
+  }
+}
+
+const binDir = getBinDir();
 
 let ytDlpFilename = "yt-dlp";
 let ytDlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
@@ -70,62 +96,90 @@ let ytDlpPath = path.join(binDir, ytDlpFilename);
 let isYtDlpAvailable = false;
 let resolvedFfmpegPath: string | null = null;
 
-// Ensure bin directory exists
-if (!fs.existsSync(binDir)) {
-  fs.mkdirSync(binDir, { recursive: true });
+// Ensure binary is executable: on Linux/Vercel, if stored in read-only /var/task, copy to /tmp and chmod 0o755
+function ensureExecutableBinary(srcPath: string): string {
+  if (platform === "win32") return srcPath;
+
+  if (srcPath.startsWith(os.tmpdir())) {
+    try { fs.chmodSync(srcPath, 0o755); } catch (_) {}
+    return srcPath;
+  }
+
+  const destPath = path.join(os.tmpdir(), path.basename(srcPath));
+  try {
+    if (!fs.existsSync(destPath) || fs.statSync(destPath).size !== fs.statSync(srcPath).size) {
+      fs.copyFileSync(srcPath, destPath);
+      fs.chmodSync(destPath, 0o755);
+      console.log(`[Binary Setup] Prepared executable binary in /tmp: ${destPath}`);
+    }
+    return destPath;
+  } catch (err: any) {
+    console.warn("[Binary Setup] Could not copy binary to /tmp; trying original path:", err.message);
+    try { fs.chmodSync(srcPath, 0o755); } catch (_) {}
+    return srcPath;
+  }
 }
 
 // Locate FFmpeg across ffmpeg-static npm package, bin directory, env vars, and standard system paths
 function resolveFfmpeg(): string | null {
-  // 1. Check direct imported ffmpegStatic path
   if (ffmpegStatic && typeof ffmpegStatic === "string" && fs.existsSync(ffmpegStatic)) {
-    return ffmpegStatic;
+    return ensureExecutableBinary(ffmpegStatic);
   }
 
-  // 2. Check bin directory
   const localBinFfmpeg = path.join(binDir, platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
   if (fs.existsSync(localBinFfmpeg)) {
-    return localBinFfmpeg;
+    return ensureExecutableBinary(localBinFfmpeg);
   }
 
-  // 3. Check require for bundled CJS
   try {
     const fsReq = require("ffmpeg-static");
     if (fsReq && typeof fsReq === "string" && fs.existsSync(fsReq)) {
-      return fsReq;
+      return ensureExecutableBinary(fsReq);
     }
   } catch (_) {}
 
-  // 4. Check FFMPEG_PATH environment variable
   if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
-    return process.env.FFMPEG_PATH;
+    return ensureExecutableBinary(process.env.FFMPEG_PATH);
   }
 
-  // 5. Check common Linux and Windows paths
   const candidates = [
     "/usr/bin/ffmpeg",
     "/usr/local/bin/ffmpeg",
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) {
-      return c;
+      return ensureExecutableBinary(c);
     }
   }
 
   return null;
 }
 
-// Locate existing yt-dlp binary across common locations (Docker, local, system PATH)
+// Locate existing yt-dlp binary across common locations (Vercel bundled, Docker, local, system PATH)
 function findExistingYtDlp(): string | null {
   if (process.env.YT_DLP_PATH && fs.existsSync(process.env.YT_DLP_PATH)) {
-    return process.env.YT_DLP_PATH;
+    return ensureExecutableBinary(process.env.YT_DLP_PATH);
   }
 
   const candidates = [
+    // 1. Writable or local bin directory
     path.join(binDir, ytDlpFilename),
     path.join(binDir, "yt-dlp"),
     path.join(binDir, "yt-dlp.exe"),
     path.join(binDir, "yt-dlp_linux"),
+
+    // 2. Read-only project directory (Vercel /var/task/bin)
+    path.join(process.cwd(), "bin", ytDlpFilename),
+    path.join(process.cwd(), "bin", "yt-dlp_linux"),
+    path.join(process.cwd(), "bin", "yt-dlp"),
+
+    // 3. Temporary directory (AWS Lambda / Vercel tmp)
+    path.join(os.tmpdir(), "bin", ytDlpFilename),
+    path.join(os.tmpdir(), "bin", "yt-dlp_linux"),
+    path.join(os.tmpdir(), "yt-dlp_linux"),
+    path.join(os.tmpdir(), "yt-dlp"),
+
+    // 4. Docker / System locations
     "/app/bin/yt-dlp",
     "/app/bin/yt-dlp_linux",
     "/usr/local/bin/yt-dlp",
@@ -137,7 +191,7 @@ function findExistingYtDlp(): string | null {
       try {
         const stats = fs.statSync(c);
         if (stats.size >= 1_000_000) {
-          return c;
+          return ensureExecutableBinary(c);
         }
       } catch (_) {}
     }
@@ -146,7 +200,7 @@ function findExistingYtDlp(): string | null {
   return null;
 }
 
-// Download yt-dlp binary programmatically (SSL bypass for restrictive networks)
+// Download yt-dlp binary programmatically (SSL bypass for restrictive networks, writes to writable binDir)
 function downloadYtDlp(): Promise<void> {
   return new Promise((resolve, reject) => {
     function download(url: string, redirectCount = 0) {
@@ -198,27 +252,26 @@ function downloadYtDlp(): Promise<void> {
   });
 }
 
-// Initialize yt-dlp & FFmpeg — awaited before server starts accepting requests
+// Initialize yt-dlp & FFmpeg — awaited before requests are processed
 async function initYtDlp() {
-  // Resolve FFmpeg binary
   resolvedFfmpegPath = resolveFfmpeg();
-  console.log(`FFmpeg status: ${resolvedFfmpegPath ? `AVAILABLE at ${resolvedFfmpegPath}` : "NOT FOUND (separate audio/video muxing will use available fallbacks)"}`);
+  console.log(`[Diagnostic] FFmpeg status: ${resolvedFfmpegPath ? `AVAILABLE at ${resolvedFfmpegPath}` : "NOT FOUND (separate audio/video muxing will use pre-muxed single stream fallbacks)"}`);
 
   try {
     const existing = findExistingYtDlp();
     if (existing) {
       ytDlpPath = existing;
       const stats = fs.statSync(ytDlpPath);
-      console.log(`yt-dlp is available at: ${ytDlpPath} (${stats.size} bytes)`);
+      console.log(`[Diagnostic] yt-dlp is available at: ${ytDlpPath} (${stats.size} bytes)`);
       isYtDlpAvailable = true;
       return;
     }
 
-    console.log(`No existing yt-dlp binary found. Downloading to: ${ytDlpPath}...`);
+    console.log(`[Diagnostic] No existing yt-dlp binary found. Downloading to: ${ytDlpPath}...`);
     await downloadYtDlp();
     isYtDlpAvailable = true;
   } catch (error: any) {
-    console.error("Failed to initialize yt-dlp binary:", error.message);
+    console.error("[Diagnostic] Failed to initialize yt-dlp binary:", error.message);
     isYtDlpAvailable = false;
   }
 }
@@ -238,6 +291,11 @@ const COBALT_CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
 // Fetch working instances from cobalt.directory
 async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "youtube" | "tiktok" = "youtube"): Promise<string[]> {
+  if (process.env.COBALT_API_URL) {
+    const custom = process.env.COBALT_API_URL.trim().replace(/\/+$/, "");
+    return [custom];
+  }
+
   const now = Date.now();
   if (cobaltCache.instances[platform] && cobaltCache.instances[platform].length > 0 && (now - cobaltCache.lastFetched < COBALT_CACHE_DURATION)) {
     console.log(`Using cached Cobalt instances list for platform: ${platform}...`);
@@ -335,9 +393,9 @@ async function getWorkingCobaltInstances(platform: "instagram" | "twitter" | "yo
 
   // Static fallback — open (non-JWT) Cobalt instances
   const fallbackList = [
+    "https://cobalt.canine.tools",
     "https://api.cobalt.liubquanti.click",
-    "https://dog.kittycat.boo",
-    "https://cobaltapi.kittycat.boo",
+    "https://cobalt-api.kwiatekm.tokyo",
   ];
   console.log("Using hardcoded Cobalt fallback list.");
   return fallbackList;
@@ -386,6 +444,32 @@ function getTwitterCookieFile(): string | null {
     return cookieFilePath;
   } catch (e: any) {
     console.warn("Failed to write Twitter cookie file:", e.message);
+    return null;
+  }
+}
+
+// Write a Netscape cookie file for YouTube if session cookie or base64 cookies are provided via env
+function getYouTubeCookieFile(): string | null {
+  const cookieStr = process.env.YOUTUBE_COOKIE;
+  const cookieB64 = process.env.YOUTUBE_COOKIES_BASE64 || process.env.YOUTUBE_COOKIE_BASE64;
+
+  let content = "";
+  if (cookieB64) {
+    try {
+      content = Buffer.from(cookieB64, "base64").toString("utf8");
+    } catch (_) {}
+  } else if (cookieStr) {
+    content = cookieStr;
+  }
+
+  if (!content || !content.trim()) return null;
+
+  try {
+    const cookieFilePath = path.join(os.tmpdir(), "youtube_cookies.txt");
+    fs.writeFileSync(cookieFilePath, content, "utf8");
+    return cookieFilePath;
+  } catch (e: any) {
+    console.warn("Failed to write YouTube cookie file:", e.message);
     return null;
   }
 }
@@ -711,9 +795,16 @@ function pipeYtDlpMedia(
   // Video: prioritize universal H.264 (AVC1) for video & AAC (m4a) for audio up to targetHeight,
   // then fallback to general video+audio merge, then pre-muxed, then best.
   // Audio: prioritize native MP3/M4A, or convert to MP3 via ffmpeg if available.
-  const formatStr = isAudio
-    ? "ba[ext=mp3]/ba[ext=m4a]/ba[acodec^=mp4a]/ba/b"
-    : `bv*[height<=${targetHeight}][vcodec^=avc1]+ba[acodec^=mp4a]/bv*[height<=${targetHeight}][vcodec^=avc]+ba[ext=m4a]/bv*[height<=${targetHeight}][ext=mp4]+ba[ext=m4a]/bv*[height<=${targetHeight}]+ba/b[height<=${targetHeight}]/bv*+ba/b`;
+  let formatStr = "";
+  if (isAudio) {
+    formatStr = resolvedFfmpegPath
+      ? "ba[ext=mp3]/ba[ext=m4a]/ba[acodec^=mp4a]/ba/b"
+      : "ba[ext=m4a]/ba[ext=mp3]/ba/b";
+  } else {
+    formatStr = resolvedFfmpegPath
+      ? `bv*[height<=${targetHeight}][vcodec^=avc1]+ba[acodec^=mp4a]/bv*[height<=${targetHeight}][vcodec^=avc]+ba[ext=m4a]/bv*[height<=${targetHeight}][ext=mp4]+ba[ext=m4a]/bv*[height<=${targetHeight}]+ba/b[height<=${targetHeight}]/bv*+ba/b`
+      : `b[height<=${targetHeight}][ext=mp4]/b[height<=${targetHeight}]/b/best`;
+  }
 
   const contentType = isAudio ? "audio/mpeg" : "video/mp4";
   const disposition = isDownload
@@ -736,7 +827,7 @@ function pipeYtDlpMedia(
 
   if (isAudio && resolvedFfmpegPath) {
     args.push("-x", "--audio-format", "mp3");
-  } else if (!isAudio) {
+  } else if (!isAudio && resolvedFfmpegPath) {
     args.push("--merge-output-format", "mp4");
   }
 
@@ -758,6 +849,16 @@ function pipeYtDlpMedia(
   const twitterCookieFile = getTwitterCookieFile();
   if (twitterCookieFile && (/twitter\.com|x\.com/.test(src))) {
     args.push("--cookies", twitterCookieFile);
+  }
+
+  const ytCookieFile = getYouTubeCookieFile();
+  if (ytCookieFile && (/youtube\.com|youtu\.be/.test(src))) {
+    args.push("--cookies", ytCookieFile);
+  }
+
+  const ytProxy = process.env.YOUTUBE_PROXY || process.env.HTTP_PROXY;
+  if (ytProxy && (/youtube\.com|youtu\.be/.test(src))) {
+    args.push("--proxy", ytProxy);
   }
 
   args.push("-o", tempFile);
@@ -865,22 +966,15 @@ function pipeYtDlpMedia(
 
 // NOTE: initYtDlp() is now awaited inside startServer() before the server listens.
 
-async function startServer() {
-  const app = express();
-  const PORT = parseInt(process.env.PORT || "3000", 10);
+const app = express();
 
-  // Wait for yt-dlp to be ready BEFORE accepting any requests
-  console.log("Initializing yt-dlp binary...");
-  await initYtDlp();
-  console.log(`yt-dlp ready: ${isYtDlpAvailable ? "YES" : "NO (will use fallback)"}`);
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-  // Middleware
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
-
-  // Initialize Gemini AI client safely (lazy loaded on request)
-  let aiClient: GoogleGenAI | null = null;
-  function getAiClient(): GoogleGenAI {
+// Initialize Gemini AI client safely (lazy loaded on request)
+let aiClient: GoogleGenAI | null = null;
+function getAiClient(): GoogleGenAI {
     if (!aiClient) {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
@@ -907,7 +1001,20 @@ async function startServer() {
       const platform = detectPlatform(url);
       const isYoutube = platform === "youtube";
 
-      console.log(`Processing media request for (${platform}): ${url} (Mode: ${downloadMode || "auto"}, Quality: ${videoQuality || "1080"})`);
+      let parsedHostname = "unknown";
+      try {
+        parsedHostname = new URL(url).hostname;
+      } catch (_) {}
+
+      // Safe Diagnostic Logging (Step 6)
+      console.log(`[Extractor Diagnostic] Request received:`);
+      console.log(`  - Platform: ${platform}`);
+      console.log(`  - Hostname: ${parsedHostname}`);
+      console.log(`  - Quality: ${videoQuality || "1080"}`);
+      console.log(`  - Mode: ${downloadMode || "auto"}`);
+      console.log(`  - yt-dlp: ${isYtDlpAvailable ? `AVAILABLE (${ytDlpPath})` : "NOT FOUND"}`);
+      console.log(`  - FFmpeg: ${resolvedFfmpegPath ? `AVAILABLE (${resolvedFfmpegPath})` : "NOT FOUND"}`);
+      console.log(`  - Environment: ${process.env.VERCEL ? "Vercel Serverless" : "Container/Node"}`);
 
       // ── Specialized Strategy 0: Direct High-Speed TikTok Media Extraction ─────────
       if (platform === "tiktok") {
@@ -923,53 +1030,89 @@ async function startServer() {
 
       // ── Specialized Strategy 1: Dedicated YouTube Pipeline via yt-dlp ──────────────
       if (platform === "youtube") {
-        try {
-          console.log(`Extracting YouTube media metadata via yt-dlp for: ${url}...`);
-          const info = await getMediaInfo(url);
-          if (info) {
-            const rawTitle = info.title || "YouTube Video";
-            const cleanTitle = rawTitle
-              .replace(/[/\\?%*:|"<>]/g, "_")
-              .replace(/\s+/g, "_")
-              .substring(0, 80) || "youtube_video";
+        let ytDlpSuccess = false;
+        if (isYtDlpAvailable) {
+          try {
+            console.log(`[Extractor Diagnostic] Extracting YouTube media metadata via yt-dlp for: ${url}...`);
+            const info = await getMediaInfo(url);
+            if (info) {
+              const rawTitle = info.title || "YouTube Video";
+              const cleanTitle = rawTitle
+                .replace(/[/\\?%*:|"<>]/g, "_")
+                .replace(/\s+/g, "_")
+                .substring(0, 80) || "youtube_video";
 
-            const isAudio = downloadMode === "audio";
-            const targetHeight = parseInt(videoQuality as string) || 1080;
-            const ext = isAudio ? "mp3" : "mp4";
-            const safeFilename = `${cleanTitle}.${ext}`;
+              const isAudio = downloadMode === "audio";
+              const targetHeight = parseInt(videoQuality as string) || 1080;
+              const ext = isAudio ? "mp3" : "mp4";
+              const safeFilename = `${cleanTitle}.${ext}`;
 
-            let thumb = info.thumbnail || info.thumbnails?.[0]?.url || "";
-            const ytMatch = url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-            if (!thumb && ytMatch) {
-              thumb = `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`;
+              let thumb = info.thumbnail || info.thumbnails?.[0]?.url || "";
+              const ytMatch = url.match(/(?:v=|shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+              if (!thumb && ytMatch) {
+                thumb = `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`;
+              }
+
+              // Check if direct progressive stream is available in formats
+              let directCdnStreamUrl: string | null = null;
+              if (Array.isArray(info.formats)) {
+                if (isAudio) {
+                  const audioFmt = info.formats.find((f: any) => f.vcodec === "none" && f.acodec !== "none" && f.url && f.ext === "m4a")
+                    || info.formats.find((f: any) => f.vcodec === "none" && f.acodec !== "none" && f.url);
+                  if (audioFmt?.url) {
+                    directCdnStreamUrl = audioFmt.url;
+                  }
+                } else {
+                  const progressiveFormats = info.formats
+                    .filter((f: any) => f.vcodec !== "none" && f.acodec !== "none" && f.url && (f.ext === "mp4" || f.container === "mp4"))
+                    .sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
+                  if (progressiveFormats.length > 0) {
+                    const matched = progressiveFormats.find((f: any) => (f.height || 0) <= targetHeight) || progressiveFormats[0];
+                    if (matched?.url) {
+                      directCdnStreamUrl = matched.url;
+                    }
+                  }
+                }
+              }
+
+              // In Vercel serverless, if direct CDN stream is available, route via /api/stream to avoid 10s timeout
+              const useDirectProxy = Boolean(process.env.VERCEL && directCdnStreamUrl);
+              const proxyUrl = directCdnStreamUrl
+                ? `/api/stream?url=${encodeURIComponent(directCdnStreamUrl)}&filename=${encodeURIComponent(safeFilename)}&src=${encodeURIComponent(url)}`
+                : `/api/media?src=${encodeURIComponent(url)}&quality=${targetHeight}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
+
+              const mediaPipeUrl = `/api/media?src=${encodeURIComponent(url)}&quality=${targetHeight}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
+              const fallbackMediaUrl = `/api/media?src=${encodeURIComponent(url)}&quality=720&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
+
+              console.log(`[Extractor Diagnostic] YouTube yt-dlp SUCCESS: "${rawTitle}" (Direct Stream: ${directCdnStreamUrl ? "YES" : "NO"})`);
+              ytDlpSuccess = true;
+
+              return res.json({
+                status: "stream",
+                url: useDirectProxy ? proxyUrl : mediaPipeUrl,
+                previewUrl: useDirectProxy ? proxyUrl : mediaPipeUrl,
+                fallbackUrl: fallbackMediaUrl,
+                title: rawTitle,
+                thumb,
+                filename: safeFilename,
+              });
             }
-
-            const mediaUrl = `/api/media?src=${encodeURIComponent(url)}&quality=${targetHeight}&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
-            const fallbackMediaUrl = `/api/media?src=${encodeURIComponent(url)}&quality=720&mode=${downloadMode || "auto"}&filename=${encodeURIComponent(safeFilename)}`;
-
-            console.log(`YouTube extraction successful: "${rawTitle}" -> ${mediaUrl}`);
-
-            return res.json({
-              status: "stream",
-              url: mediaUrl,
-              previewUrl: mediaUrl,
-              fallbackUrl: fallbackMediaUrl,
-              title: rawTitle,
-              thumb,
-              filename: safeFilename,
-            });
+          } catch (ytErr: any) {
+            const errCategory = ytErr.message?.includes("Sign in")
+              ? "BOT_VERIFICATION"
+              : ytErr.message?.includes("Private video")
+              ? "PRIVATE_RESTRICTED"
+              : ytErr.message?.includes("not available")
+              ? "BINARY_UNAVAILABLE"
+              : "GENERAL_EXTRACTION_ERROR";
+            console.warn(`[Extractor Diagnostic] yt-dlp extraction failed (${errCategory}):`, ytErr.message);
+            console.log("[Extractor Diagnostic] Falling back to Cobalt parallel racing...");
           }
-        } catch (ytErr: any) {
-          console.error("YouTube yt-dlp extraction error:", ytErr.message);
-          return res.status(422).json({
-            error: "YouTube extraction failed",
-            details: ytErr.message?.includes("Private video")
-              ? "This video is private or restricted."
-              : ytErr.message?.includes("Sign in")
-              ? "YouTube requested bot verification for this video."
-              : "Unable to extract media from this YouTube URL. Please verify the link and try again.",
-          });
+        } else {
+          console.warn("[Extractor Diagnostic] yt-dlp binary is not available. Falling back to Cobalt parallel racing...");
         }
+
+        // If yt-dlp didn't succeed, do NOT return 422 here! Fall through to Cobalt race below!
       }
 
       // ── Helper: POST to single Cobalt instance with fast timeout ──────────────
@@ -1538,6 +1681,18 @@ async function startServer() {
     }
   });
 
+// Export app and initYtDlp for Vercel Serverless / external wrappers
+export { app, initYtDlp };
+export default app;
+
+async function startServer() {
+  const PORT = parseInt(process.env.PORT || "3000", 10);
+
+  // Wait for yt-dlp to be ready BEFORE accepting any requests
+  console.log("Initializing yt-dlp binary...");
+  await initYtDlp();
+  console.log(`yt-dlp ready: ${isYtDlpAvailable ? "YES" : "NO (will use fallback)"}`);
+
   // Serve static assets or mount Vite in development
   if (process.env.NODE_ENV !== "production") {
     console.log("Starting server in development mode with Vite middleware...");
@@ -1546,7 +1701,7 @@ async function startServer() {
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (!process.env.VERCEL) {
     console.log("Starting server in production mode...");
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
@@ -1555,13 +1710,18 @@ async function startServer() {
     });
   }
 
-  // Bind to port 3000 and 0.0.0.0 (required for Cloud Run routing)
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  // Bind to port if not running in Vercel Serverless Function
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
 }
 
-startServer().catch((error) => {
-  console.error("Failed to start fullstack server:", error);
-  process.exit(1);
-});
+// Only launch standalone daemon server when NOT running inside Vercel Serverless
+if (!process.env.VERCEL) {
+  startServer().catch((error) => {
+    console.error("Failed to start fullstack server:", error);
+    process.exit(1);
+  });
+}
